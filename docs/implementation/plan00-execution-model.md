@@ -280,3 +280,134 @@ Stop and escalate contract/ADR rather than continuing if:
 - Rust/Worker runtime cannot support an assumed Cloudflare primitive;
 - a provider/library forces secrets into the client;
 - implementation materially violates local-first migration guarantees.
+
+
+## 15. Operational artifacts
+
+Plan00 is enforced through repository artifacts, not memory.
+
+Authoritative files:
+
+- `docs/implementation/README.md` — execution hub and plan index;
+- `docs/implementation/STATUS.md` — coordinator-owned live execution state;
+- `docs/implementation/templates/work-packet.md` — mandatory packet definition;
+- `docs/implementation/templates/contract-gate.md` — mandatory phase contract freeze;
+- `docs/implementation/templates/integration-gate.md` — mandatory vertical-slice exit gate;
+- `docs/implementation/templates/handoff.md` — downstream handoff;
+- `docs/implementation/templates/change-request.md` — only valid way to modify a frozen contract while dependent work exists;
+- `.github/ISSUE_TEMPLATE/work-packet.md` — GitHub issue bootstrap;
+- `.github/ISSUE_TEMPLATE/contract-gate.md` — GitHub Contract Gate bootstrap;
+- `.github/PULL_REQUEST_TEMPLATE.md` — PR evidence/checklist.
+
+If a packet is not defined clearly enough to fill the work-packet template, it is not ready to be delegated.
+
+## 16. Coordinator role
+
+Each active phase has exactly one coordinator.
+
+The coordinator does not need to implement the most code. The coordinator owns integration coherence.
+
+Coordinator responsibilities:
+
+1. open the Contract Gate;
+2. assign packet IDs;
+3. prevent overlapping write surfaces;
+4. assign one owner for shared files;
+5. update `STATUS.md`;
+6. pause dependent merges when a frozen contract changes;
+7. ensure accepted Change Requests reach all dependent packets;
+8. call the Integration Gate;
+9. declare phase exit.
+
+Coding agents MUST NOT opportunistically update `STATUS.md` unless assigned coordinator role.
+
+This avoids a coordination file becoming the hottest merge-conflict surface in the repository.
+
+## 17. Contract change protocol
+
+A frozen contract is allowed to be wrong. It is not allowed to change invisibly.
+
+When implementation evidence invalidates a Contract Gate:
+
+1. create a Change Request from `templates/change-request.md`;
+2. identify active and merged dependents;
+3. pause dependent merges whose assumptions are affected;
+4. update spec/ADR first if the product or architecture contract itself changes;
+5. update the Contract Gate artifact/contract source;
+6. regenerate fixtures/types where applicable;
+7. rebase or patch affected packets;
+8. coordinator updates `STATUS.md`;
+9. resume merges.
+
+Small implementation details that do not affect downstream contracts do not require a Change Request.
+
+## 18. Packet lifecycle
+
+Canonical lifecycle:
+
+```text
+ready
+→ claimed
+→ in_progress
+→ review
+→ merged
+```
+
+Exceptional states:
+
+```text
+blocked
+superseded
+cancelled
+```
+
+Rules:
+
+- one packet has one active owner;
+- an owner may release a packet back to `ready`;
+- blocked packets name the blocker, not merely "waiting";
+- superseded packets point to the replacement packet/change request;
+- merged packets are immutable historical work units.
+
+## 19. PR evidence rule
+
+Every implementation PR MUST identify:
+
+- packet ID;
+- Contract Gate commit/version;
+- spec requirement IDs;
+- declared write surface;
+- contracts consumed/changed;
+- tests and security evidence;
+- migration/rollback impact;
+- downstream handoff.
+
+A PR that changes a frozen contract without an accepted Change Request is not merge-ready.
+
+## 20. Integration-first review
+
+Review should prioritize causal risk over file count.
+
+Highest-risk surfaces get explicit reviewer focus:
+
+1. tenant isolation / authorization;
+2. secrets / credential handling;
+3. state-machine and concurrency invariants;
+4. migration / compatibility;
+5. inference/tool side effects;
+6. user-visible failure semantics;
+7. performance regression.
+
+Formatting and stylistic cleanup must not obscure those questions.
+
+## 21. Plan00 completion state
+
+The execution model is **operationalized** when:
+
+- repository templates exist;
+- PR and issue templates point to packet/gate artifacts;
+- `AGENTS.md` makes the workflow mandatory;
+- `STATUS.md` identifies P01 as the next executable phase;
+- all later plans can be decomposed into packet IDs without redefining the workflow.
+
+Plan00 then remains **Active** as the governing execution model while implementation proceeds.
