@@ -46,6 +46,20 @@ For every implementation packet:
 - complete the handoff section before PR review;
 - use the repository PR template as required evidence, not optional prose.
 
+## Goal prompt library
+
+`docs/prompts/` contains the reusable long-horizon `/goal` prompts for executing P00–P09.
+
+Before starting a phase as coordinator:
+
+1. Read `docs/prompts/README.md`.
+2. Use the `goal-NN.md` matching the current implementation plan.
+3. Treat the goal prompt as an execution wrapper around specs/plans/ADRs, never as a higher-authority source.
+4. Do not run a later goal before `docs/implementation/STATUS.md` shows its dependencies are satisfied.
+5. Do not concatenate multiple phase goals into one mega-prompt.
+
+The prompt library exists to reduce prompt drift across agents; it does not replace the repository contracts.
+
 ## Read first
 
 Before changing architecture, dependencies, build tooling, public API contracts, authentication, authorization, persistence, or cross-cutting UI behavior:
