@@ -1,16 +1,15 @@
 {
   "name": "lumi-agents-control-plane",
-  "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@12.5.1",
-  "engines": {
-    "node": ">=24 <25"
-  },
+  "private": true,
   "scripts": {
     "dev": "pnpm -r --parallel --stream --filter @runlumi/agents-cp-api --filter @runlumi/agents-cp-web dev",
     "build": "pnpm -r --filter @runlumi/agents-cp-api --filter @runlumi/agents-cp-web build",
-    "format": "oxfmt . && cargo fmt --all",
-    "format:check": "oxfmt --check . && cargo fmt --all -- --check",
+    "db:migrate:local": "pnpm --filter @runlumi/agents-cp-api db:migrations:apply:local",
+    "db:migrations:list:local": "pnpm --filter @runlumi/agents-cp-api db:migrations:list:local",
+    "smoke:local": "pnpm --filter @runlumi/agents-cp-api smoke:local",
+    "format": "oxfmt apps/web/src apps/web/vite.config.ts apps/web/index.html apps/web/package.json apps/web/components.json apps/web/tsconfig.json apps/api/package.json apps/api/scripts apps/api/wrangler.jsonc package.json pnpm-workspace.yaml .github/workflows/checks.yml && cargo fmt --all",
+    "format:check": "oxfmt --check apps/web/src apps/web/vite.config.ts apps/web/index.html apps/web/package.json apps/web/components.json apps/web/tsconfig.json apps/api/package.json apps/api/scripts apps/api/wrangler.jsonc package.json pnpm-workspace.yaml .github/workflows/checks.yml && cargo fmt --all -- --check",
     "lint": "oxlint --type-aware apps/web/src apps/web/vite.config.ts",
     "typecheck": "pnpm --filter @runlumi/agents-cp-web typecheck",
     "test": "pnpm --filter @runlumi/agents-cp-web test && cargo test --workspace",
@@ -20,6 +19,11 @@
   },
   "devDependencies": {
     "oxfmt": "0.70.0",
-    "oxlint": "1.85.0"
-  }
+    "oxlint": "1.85.0",
+    "oxlint-tsgolint": "7.0.2001"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "pnpm@12.5.1"
 }

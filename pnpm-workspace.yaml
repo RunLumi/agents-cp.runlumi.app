@@ -1,2 +1,11 @@
 packages:
   - "apps/*"
+# These exact native setup hooks install the already-declared platform
+# binaries required by Vite/esbuild and Wrangler/workerd.
+allowBuilds:
+  esbuild@0.28.1: true
+  workerd@1.20260921.1: true
+# The repository pins this Wrangler release; it is currently inside the host's
+# seven-day minimum-release-age window. Keep the exception version-specific.
+minimumReleaseAgeExclude:
+  - wrangler@4.137.0

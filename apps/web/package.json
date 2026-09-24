@@ -1,7 +1,7 @@
 {
   "name": "@runlumi/agents-cp-web",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",
+    "@types/node": "24.13.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
@@ -27,7 +28,6 @@
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.1.0",
-    "vitest": "5.0.0",
-    "@types/node": "24.13.6"
+    "vitest": "5.0.0"
   }
 }

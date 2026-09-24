@@ -7,17 +7,18 @@ Last initialized: 2026-09-24
 ## Current phase
 
 - Active execution model: **P00**
+- Current implementation phase: **P01 in progress**
 - Next implementable phase: **P01**
-- Current Contract Gate: **not started**
-- Shared-file owner: **unassigned**
-- Integration owner: **unassigned**
+- Current Contract Gate: **P01-CG `p01-cg-v1`, frozen at `7835fd9`**
+- Shared-file owner: **P01 coordinator**
+- Integration owner: **P01 coordinator**
 
 ## Phase status
 
 | Phase | State | Contract Gate | Integration Gate | Notes |
 |---|---|---|---|---|
 | P00 | active | n/a | n/a | execution mechanics operationalized |
-| P01 | ready | not started | not started | next phase |
+| P01 | in_progress | frozen: `7835fd9` | not started | MOD-01, BE-01, and FE-01 executing |
 | P02 | blocked | blocked | blocked | waits for P01 |
 | P03 | blocked | blocked | blocked | waits for P02 |
 | P04 | blocked | blocked | blocked | waits for P02 |
@@ -50,6 +51,17 @@ The coordinator alone:
 - declares Integration Gate readiness;
 - decides whether a contract change blocks dependent merges;
 - marks phase exit only after the real vertical slice passes.
+
+## P01 packet status
+
+| Packet | State | Notes |
+|---|---|---|
+| P01-MOD-01 | in_progress | Core primitives |
+| P01-BE-01 | in_progress | D1 substrate |
+| P01-BE-02 | ready | Starts after BE-01 repository interface |
+| P01-BE-03 | ready | Starts after core types |
+| P01-FE-01 | in_progress | Uses frozen fixtures |
+| P01-QA-01 | ready | Integration work follows packet interfaces |
 
 ## Rule
 

@@ -34,7 +34,7 @@ Raw `Env` should not leak through domain code.
 
 ## WASM profile
 
-The release profile favors compact output: LTO, one codegen unit, `opt-level = "s"`, stripped symbols, panic abort.
+The release profile favors compact output: LTO, one codegen unit, `opt-level = "s"`, debug information stripped, panic abort. Do not use `strip = true` or strip symbols: wasm-bindgen 0.2.125+ needs the externref table to generate catch wrappers, and full stripping removes it. The Worker dry-run is the authority for validating changes to these flags.
 
 Move toward a speed-optimized profile only after a benchmark shows user-visible benefit that outweighs artifact/startup cost.
 
