@@ -6,6 +6,20 @@ Build the Lumi Agents control plane so it feels immediate, calm, and dependable.
 
 This file is the operating contract for coding agents in this repository.
 
+## Functional specifications
+
+`docs/specs/` is the authoritative functional contract for the control plane.
+
+Before implementing or changing a product feature:
+
+1. Read `docs/specs/README.md`.
+2. Read the specific `fXX-*.md` feature spec(s) involved.
+3. Preserve cross-feature invariants for tenant isolation, authorization, audit, secrets, budgets, device policy and data retention.
+4. If implementation requires behavior that contradicts a MUST requirement, update the spec/ADR intentionally before changing code.
+5. Do not invent a parallel concept when the spec already defines the resource vocabulary.
+
+Feature work is not done if code exists but the relevant acceptance criteria in `docs/specs` are not demonstrably satisfied.
+
 ## Read first
 
 Before changing architecture, dependencies, build tooling, public API contracts, authentication, authorization, persistence, or cross-cutting UI behavior:
