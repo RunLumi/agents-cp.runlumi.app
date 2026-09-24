@@ -20,6 +20,22 @@ Before implementing or changing a product feature:
 
 Feature work is not done if code exists but the relevant acceptance criteria in `docs/specs` are not demonstrably satisfied.
 
+## Implementation plans
+
+`docs/implementation/` is the execution graph for multi-agent delivery.
+
+Before starting implementation work:
+
+1. Read `docs/implementation/plan00-execution-model.md`.
+2. Identify the current phase and exact work packet (`Pxx-MOD/BE/FE/INT/QA-yy`).
+3. Stay inside the packet's declared write surface unless the plan explicitly assigns a shared-file edit.
+4. Do not begin a dependent packet before its Contract Gate is merged.
+5. Frontend should begin from frozen contracts/fixtures rather than waiting for backend completion.
+6. Every phase must end with a real vertical integration slice, not only mocks.
+7. If work no longer fits the dependency graph, update the implementation plan intentionally instead of creating hidden sequencing assumptions.
+
+The feature specs define **what** must exist. The implementation plans define **how work is partitioned and merged safely**.
+
 ## Read first
 
 Before changing architecture, dependencies, build tooling, public API contracts, authentication, authorization, persistence, or cross-cutting UI behavior:
