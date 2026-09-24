@@ -47,3 +47,25 @@ Implementation plans define **how work is partitioned**.
 ADRs define **why durable architecture choices exist**.
 
 A coding agent must not silently change any of those layers from inside an unrelated implementation packet.
+
+
+## Goal prompts
+
+Reusable coordinator prompts live in `docs/prompts/`.
+
+Use the goal matching the current executable plan:
+
+```text
+P00 -> docs/prompts/goal-00.md
+P01 -> docs/prompts/goal-01.md
+P02 -> docs/prompts/goal-02.md
+P03 -> docs/prompts/goal-03.md
+P04 -> docs/prompts/goal-04.md
+P05 -> docs/prompts/goal-05.md
+P06 -> docs/prompts/goal-06.md
+P07 -> docs/prompts/goal-07.md
+P08 -> docs/prompts/goal-08.md
+P09 -> docs/prompts/goal-09.md
+```
+
+See `docs/prompts/README.md` for usage, authority order, parallelism rules, and feature coverage.
