@@ -7,7 +7,7 @@ Prove P02 as a real multi-tenant identity and organization slice: browser sessio
 ## Preconditions
 
 - [x] P01 complete: `docs/implementation/gates/P01-IG.md` PASS.
-- [x] P02-CG frozen at `ba35fb6`; clarification `P02-CR-001` recorded at `3719b8d`.
+- [x] P02-CG frozen at `ba35fb6`; clarification `P02-CR-001` recorded at `0290e68`.
 - [x] P02 packets and handoffs integrated on the current coordinator branch.
 - [x] `0002_p02_identity_organizations.sql`, `0003_p02_auth_rate_limits.sql`, `0004_p02_identity_link_challenges.sql`, `0005_p02_multiple_email_identities.sql`, and `0006_p02_device_consumed_state.sql` applied to local Wrangler D1.
 - [x] Development Worker exposes local-only verification/login/device fixtures; production response does not return those codes.

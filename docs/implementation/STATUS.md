@@ -9,7 +9,7 @@ Last initialized: 2026-09-24
 - Active execution model: **P00**
 - Current implementation phase: **P02 complete**
 - Next implementable phase: **P03**
-- Current Contract Gate: **P02-CG `p02-cg-v1`, frozen at `ba35fb6` (P02-CR-001 at `3719b8d`)**
+- Current Contract Gate: **P02-CG `p02-cg-v1`, frozen at `ba35fb6` (P02-CR-001 at `0290e68`)**
 - Shared-file owner: **P03 coordinator when assigned**
 - Integration owner: **P03 coordinator when assigned**
 

@@ -106,6 +106,6 @@ P01 clients remain compatible: P01 errors, IDs, pagination, idempotency, and out
 
 ## Freeze
 
-- Contract Gate commit: `ba35fb6`; P02-CR-001 clarification merged at `3719b8d` (`p02-cg-v1`).
+- Contract Gate commit: `ba35fb6`; P02-CR-001 clarification merged at `0290e68` (`p02-cg-v1`).
 - Unlocked packets: P02-MOD-01..04, P02-BE-01..04, P02-FE-01..03, P02-INT-01, P02-QA-01.
 - Shared files: P02 coordinator owns manifests, Wrangler config, router, module declarations, and STATUS.
