@@ -6,7 +6,7 @@ Prove P01 as one real web → Worker → D1 → outbox → Queue → D1 status s
 
 ## Preconditions
 
-- [x] P01-MOD-01, BE-01, BE-02, BE-03, FE-01, and QA-01 write surfaces integrated on `codex/p01-execution-ssd`.
+- [x] P01-MOD-01, BE-01, BE-02, BE-03, FE-01, and QA-01 merged in PR #5 at `ced9635e047ab3ef51b9759f1138a77e9255314f`.
 - [x] Frozen contract `p01-cg-v1` is an ancestor (`7835fd9`) of packet coordination and implementation.
 - [x] Migration `0001_p01_foundation.sql` applied to Wrangler's local development D1; `wrangler d1 migrations list DB --local --env development` reported no pending migrations.
 - [x] No known contract drift; request, error, event, and endpoint shapes match P01-CG.
@@ -60,7 +60,7 @@ Browser UI
 
 ## Evidence
 
-- Tests: direct equivalents of the root checks passed: Vitest 10/10, Rust unit tests 47/47, Clippy `-D warnings`, WASM target check, TypeScript, Oxlint, Oxfmt, and Cargo fmt. The host pnpm wrapper recursively attempted to install the pinned pnpm version, so aggregate `pnpm check` was not invoked; the committed workflow runs it on GitHub.
+- Tests: GitHub Actions [Checks run 36021309632](https://github.com/RunLumi/agents-cp.runlumi.app/actions/runs/36021309632) succeeded on exact PR #5 head `01380edb127a950e7406bc9ef46a08d39dc80dc2`. It installed pinned pnpm and Node 24, ran `pnpm check` (format, lint, typecheck, Vitest 10/10, Rust tests 47/47, Clippy, WASM target check), then ran `pnpm build` (web and production-config Worker dry run). Local direct component checks also passed.
 - Local smoke: `apps/api/scripts/smoke-local.mjs` passed on 2026-09-24 using local-only development/production-config Workers and synthetic fixture data. It proved a failed stale-claim guard rolls back the D1 outbox insert, an expired key is reclaimed, and an active claim remains untouched.
 - Browser review: reference screens `docs/screens/lumi_account.webp`, `docs/screens/lumi_models_routing.webp`, and `docs/screens/lumi_budget_activity.webp` were reviewed. P01 preserves the Lumi header, rail, title, and quiet surfaces; feature-specific tabs/search/profile/data/icons are omitted because this phase has no real destinations or data. Screenshots are in `output/playwright/`.
 - Browser flow: real local request displayed `pending` then D1-backed `delivered`; stopping the Worker displayed a safe retryable error; after restart the retry action restored API connectivity. The deliberate outage produced one expected Vite proxy HTTP 502 console entry and no application exception.
@@ -72,8 +72,8 @@ Browser UI
 
 ## Required gates
 
-- [x] Direct equivalents of `pnpm check` passed locally; exact aggregate script awaits hosted CI because the host pnpm wrapper recurses while installing its pinned version.
-- [x] Direct equivalents of `pnpm build` passed locally; exact aggregate script awaits hosted CI.
+- [x] `pnpm check` passed in hosted CI on the exact merged PR head.
+- [x] `pnpm build` passed in hosted CI on the exact merged PR head.
 - [x] Rust WASM target check
 - [x] Worker dry-run
 - [x] Relevant P01 spec requirements
@@ -85,4 +85,4 @@ Browser UI
 
 ## Exit decision
 
-**LOCAL INTEGRATION PASS; PHASE EXIT PENDING HOSTED CI** — the local integration slice is real, repeatable, and uses local D1/Queues. The exact `pnpm check` and `pnpm build` scripts await GitHub Actions on the implementation PR. Remote Cloudflare deployment, production backup/restore, and the full F21 launch readiness contract remain outside this P01 evidence and are not claimed.
+**PASS** — the local integration slice is real, repeatable, and uses local D1/Queues; the exact `pnpm check` and `pnpm build` scripts passed in hosted CI on the merged head. P01 is complete and P02 may open its Contract Gate. Remote Cloudflare deployment, production backup/restore, and the full F21 launch readiness contract remain outside this P01 evidence and are not claimed.
