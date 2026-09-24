@@ -83,8 +83,20 @@ Migration `0002_p02_identity_organizations.sql` creates all P02 tables with `org
 
 P01 clients remain compatible: P01 errors, IDs, pagination, idempotency, and outbox shapes do not change. P02 adds only `/api/v1` routes and optional fields. A required contract change must use `docs/implementation/templates/change-request.md` before dependent packets proceed.
 
+## P02-CR-001 clarifications
+
+- Browser session cookie: `lumi_session`, opaque revocable value, `HttpOnly`, `Path=/`, `SameSite=Lax`, 30-day maximum; production adds `Secure`. The non-HttpOnly `lumi_csrf` cookie is paired with `X-CSRF-Token` on every cookie-authenticated mutation. Access/refresh material is never placed in a URL or local storage.
+- Refresh rotates the session row and revokes the old row. A revoked/expired row is filtered during the current D1 lookup. Auth rate limits use a D1-backed, server-digested 15-minute bucket (5 signup attempts and 10 login starts per normalized identity bucket); the raw email/IP is not persisted.
+- `X-Org-ID`, when supplied, must exactly equal the `:org_id` path. A mismatch is `org_context_mismatch`; there is no fallback.
+- Identity linking requires a current session, CSRF, and a short-lived reauthentication grant with purpose `identity_link`. A verified identity already owned by another user returns `identity_conflict` and is never merged.
+- Invitation administration includes list, revoke, and resend. Resend rotates the token hash and expiry; accepted invitations cannot be replayed. Member leave uses the same last-owner guard as removal.
+- Owner-only `org.lifecycle` permits `active -> suspended`, `suspended -> active`, and `active -> pending_deletion` after reauth and typed confirmation. The centralized policy still denies ordinary mutations while suspended/pending deletion.
+- The complete default matrix is: Owner = all P02 permissions including `org.lifecycle` and ownership transfer; Admin = org/member/team/audit management but not lifecycle or ownership transfer; Member = `org.read`, `members.read`, `teams.read`; Viewer = the same read set. Unknown permissions and stale membership versions deny.
+- P02 list responses use the P01 `Page<T>` envelope. The first slice accepts a bounded `limit` and rejects non-empty cursors with `invalid_cursor`; downstream packets must add opaque cursor encoding rather than exposing offsets.
+- P01 idempotency storage is used only for secret-free response projections. Auth, invitation, device, and reauth one-time flows never persist raw secrets in an idempotency response.
+
 ## Freeze
 
-- Contract Gate commit: recorded after this file is committed.
+- Contract Gate commit: `ba35fb6` (`p02-cg-v1`).
 - Unlocked packets: P02-MOD-01..04, P02-BE-01..04, P02-FE-01..03, P02-INT-01, P02-QA-01.
 - Shared files: P02 coordinator owns manifests, Wrangler config, router, module declarations, and STATUS.

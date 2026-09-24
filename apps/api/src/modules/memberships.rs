@@ -30,7 +30,10 @@ impl InvitationStatus {
 }
 
 pub fn role_can_be_invited(role: MembershipRole) -> bool {
-    matches!(role, MembershipRole::Admin | MembershipRole::Member | MembershipRole::Viewer)
+    matches!(
+        role,
+        MembershipRole::Admin | MembershipRole::Member | MembershipRole::Viewer
+    )
 }
 
 pub fn can_change_role(
@@ -66,8 +69,15 @@ mod tests {
 
     #[test]
     fn last_owner_cannot_be_demoted_removed_or_leave() {
-        assert!(!can_change_role(MembershipRole::Owner, MembershipRole::Owner, MembershipStatus::Active) == false);
-        assert!(!can_remove_member(MembershipRole::Admin, MembershipRole::Owner));
+        assert!(can_change_role(
+            MembershipRole::Owner,
+            MembershipRole::Owner,
+            MembershipStatus::Active
+        ));
+        assert!(!can_remove_member(
+            MembershipRole::Admin,
+            MembershipRole::Owner
+        ));
         assert!(!can_leave(MembershipRole::Owner, 1));
         assert!(can_leave(MembershipRole::Owner, 2));
     }

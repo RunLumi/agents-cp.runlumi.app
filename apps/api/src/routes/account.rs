@@ -34,6 +34,12 @@ pub struct ListQuery {
 #[serde(deny_unknown_fields)]
 pub struct EmptyRequest {}
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ReauthRequest {
+    pub purpose: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ReauthResponse {
     pub grant_id: String,
@@ -59,10 +65,20 @@ pub async fn sessions(
     let authenticated = require_session(&state, &headers, &context).await?;
     let database = database(&state, &context)?;
     let sessions = IdentityRepository::new(database)
-        .list_sessions(authenticated.principal.user_id.as_str(), &context.received_at, page_limit(query.limit), 0)
+        .list_sessions(
+            authenticated.principal.user_id.as_str(),
+            &context.received_at,
+            page_limit(query.limit),
+            0,
+        )
         .await
         .map_err(|error| database_error(&context, error))?;
-    Ok(Json(PageResponse { items: sessions, next_cursor: None, has_more: false }).into_response())
+    Ok(Json(PageResponse {
+        items: sessions,
+        next_cursor: None,
+        has_more: false,
+    })
+    .into_response())
 }
 
 #[worker::send]
@@ -77,15 +93,35 @@ pub async fn revoke_session(
     let database = database(&state, &context)?;
     let repository = IdentityRepository::new(database);
     if !repository
-        .revoke_owned_session(&session_id, authenticated.principal.user_id.as_str(), &context.received_at, "user_revoked")
+        .revoke_owned_session(
+            &session_id,
+            authenticated.principal.user_id.as_str(),
+            &context.received_at,
+            "user_revoked",
+        )
         .await
         .map_err(|error| database_error(&context, error))?
     {
-        return Err(domain_error(&context, ApiErrorCode::NotFound, "resource_not_found", "The session was not found."));
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::NotFound,
+            "resource_not_found",
+            "The session was not found.",
+        ));
     }
     let event_id = generated_id("sec");
-    let statement = security_statement(database, &context, &authenticated.principal, &event_id, "session.revoked.v1", &session_id)?;
-    database.batch(vec![statement]).await.map_err(|error| database_error(&context, error))?;
+    let statement = security_statement(
+        database,
+        &context,
+        &authenticated.principal,
+        &event_id,
+        "session.revoked.v1",
+        &session_id,
+    )?;
+    database
+        .batch(vec![statement])
+        .await
+        .map_err(|error| database_error(&context, error))?;
     let mut response = StatusCode::NO_CONTENT.into_response();
     if session_id == authenticated.session.session_id {
         clear_session_cookies(&mut response, secure_cookie(&state));
@@ -113,8 +149,18 @@ pub async fn revoke_all_sessions(
         )
         .map_err(|error| database_error(&context, error))?;
     let event_id = generated_id("sec");
-    let audit = security_statement(database, &context, &authenticated.principal, &event_id, "session.revoked_all.v1", &authenticated.session.session_id)?;
-    database.batch(vec![statement, audit]).await.map_err(|error| database_error(&context, error))?;
+    let audit = security_statement(
+        database,
+        &context,
+        &authenticated.principal,
+        &event_id,
+        "session.revoked_all.v1",
+        &authenticated.session.session_id,
+    )?;
+    database
+        .batch(vec![statement, audit])
+        .await
+        .map_err(|error| database_error(&context, error))?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -123,31 +169,64 @@ pub async fn reauthenticate(
     State(state): State<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
     headers: HeaderMap,
-    Json(_body): Json<EmptyRequest>,
+    Json(body): Json<ReauthRequest>,
 ) -> Result<Response<Body>, ApiError> {
     let authenticated = require_session(&state, &headers, &context).await?;
     require_csrf(&headers, &authenticated.session, &context).await?;
+    let purpose = body.purpose.as_deref().unwrap_or("ownership_transfer");
+    if !matches!(
+        purpose,
+        "ownership_transfer" | "identity_link" | "org_lifecycle"
+    ) {
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::ValidationFailed,
+            "purpose_invalid",
+            "Choose a supported security-check purpose.",
+        ));
+    }
     let database = database(&state, &context)?;
     let grant_id = generated_id("rag");
     let token = new_secret();
-    let token_hash = sha256_hex(&token).await.map_err(|_| service_unavailable(&context))?;
-    let expires_at = add_seconds(&context.received_at, REAUTH_TTL_SECONDS).map_err(|_| service_unavailable(&context))?;
+    let token_hash = sha256_hex(&token)
+        .await
+        .map_err(|_| service_unavailable(&context))?;
+    let expires_at = add_seconds(&context.received_at, REAUTH_TTL_SECONDS)
+        .map_err(|_| service_unavailable(&context))?;
     let repository = IdentityRepository::new(database);
     let grant_statement = repository
         .insert_reauth_statement(
             &grant_id,
             authenticated.principal.user_id.as_str(),
             authenticated.principal.session_id.as_str(),
-            "ownership_transfer",
+            purpose,
             &token_hash,
             &expires_at,
             &context.received_at,
         )
         .map_err(|error| database_error(&context, error))?;
     let event_id = generated_id("sec");
-    let audit = security_statement(database, &context, &authenticated.principal, &event_id, "reauthentication.granted.v1", &grant_id)?;
-    database.batch(vec![grant_statement, audit]).await.map_err(|error| database_error(&context, error))?;
-    Ok((StatusCode::CREATED, Json(ReauthResponse { grant_id, token, expires_at: expires_at.as_str().to_owned() })).into_response())
+    let audit = security_statement(
+        database,
+        &context,
+        &authenticated.principal,
+        &event_id,
+        "reauthentication.granted.v1",
+        &grant_id,
+    )?;
+    database
+        .batch(vec![grant_statement, audit])
+        .await
+        .map_err(|error| database_error(&context, error))?;
+    Ok((
+        StatusCode::CREATED,
+        Json(ReauthResponse {
+            grant_id,
+            token,
+            expires_at: expires_at.as_str().to_owned(),
+        }),
+    )
+        .into_response())
 }
 
 #[worker::send]
@@ -161,10 +240,19 @@ pub async fn security_events(
     let authenticated = require_session(&state, &headers, &context).await?;
     let database = database(&state, &context)?;
     let events = SecurityEventRepository::new(database)
-        .list_for_user(authenticated.principal.user_id.as_str(), page_limit(query.limit), 0)
+        .list_for_user(
+            authenticated.principal.user_id.as_str(),
+            page_limit(query.limit),
+            0,
+        )
         .await
         .map_err(|error| database_error(&context, error))?;
-    Ok(Json(PageResponse { items: events, next_cursor: None, has_more: false }).into_response())
+    Ok(Json(PageResponse {
+        items: events,
+        next_cursor: None,
+        has_more: false,
+    })
+    .into_response())
 }
 
 fn security_statement<'a>(
@@ -194,7 +282,9 @@ fn security_statement<'a>(
         correlation_id: context.correlation_id.as_str(),
         created_at: &context.received_at,
     };
-    SecurityEventRepository::new(database).insert_statement(&input).map_err(|_| service_unavailable(context))
+    SecurityEventRepository::new(database)
+        .insert_statement(&input)
+        .map_err(|_| service_unavailable(context))
 }
 
 fn generated_id(prefix: &str) -> String {
@@ -207,11 +297,20 @@ fn page_limit(limit: Option<u16>) -> u16 {
 
 fn reject_cursor(context: &RequestContext, cursor: Option<&str>) -> Result<(), ApiError> {
     if cursor.is_some_and(|value| !value.is_empty()) {
-        return Err(domain_error(context, ApiErrorCode::BadRequest, "invalid_cursor", "The pagination cursor is invalid."));
+        return Err(domain_error(
+            context,
+            ApiErrorCode::BadRequest,
+            "invalid_cursor",
+            "The pagination cursor is invalid.",
+        ));
     }
     Ok(())
 }
 
 fn service_unavailable(context: &RequestContext) -> ApiError {
-    errors::api_error(context, ApiErrorCode::ServiceUnavailable, "The identity store is unavailable.")
+    errors::api_error(
+        context,
+        ApiErrorCode::ServiceUnavailable,
+        "The identity store is unavailable.",
+    )
 }

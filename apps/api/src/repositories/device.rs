@@ -80,6 +80,7 @@ impl<'a> DeviceAuthorizationRepository<'a> {
         Self { database }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_statement(
         &self,
         id: &str,
@@ -110,7 +111,10 @@ impl<'a> DeviceAuthorizationRepository<'a> {
     ) -> worker::Result<Option<DeviceAuthorizationRecord>> {
         let row = self
             .database
-            .prepare(DEVICE_BY_DEVICE_CODE_SQL, &[BindValue::Text(device_code_hash)])?
+            .prepare(
+                DEVICE_BY_DEVICE_CODE_SQL,
+                &[BindValue::Text(device_code_hash)],
+            )?
             .first::<DeviceRow>(None)
             .await?;
         row.map(TryInto::try_into).transpose()
@@ -124,7 +128,11 @@ impl<'a> DeviceAuthorizationRepository<'a> {
     ) -> worker::Result<D1PreparedStatement> {
         self.database.prepare(
             APPROVE_DEVICE_SQL,
-            &[BindValue::Text(id), BindValue::Text(user_id), BindValue::Text(now.as_str())],
+            &[
+                BindValue::Text(id),
+                BindValue::Text(user_id),
+                BindValue::Text(now.as_str()),
+            ],
         )
     }
 

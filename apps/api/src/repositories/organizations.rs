@@ -11,6 +11,12 @@ INSERT INTO organizations (org_id, display_name, slug, state, version, created_b
 VALUES (?1, ?2, ?3, 'active', 1, ?4, ?5, ?5)
 "#;
 
+const UPDATE_ORG_STATE_SQL: &str = r#"
+UPDATE organizations
+SET state = ?2, version = version + 1, updated_at = ?3
+WHERE org_id = ?1 AND state = ?4 AND version = ?5
+"#;
+
 const INSERT_MEMBERSHIP_SQL: &str = r#"
 INSERT INTO memberships (
     membership_id, org_id, user_id, role, status, version, invited_by_user_id, joined_at, created_at, updated_at
@@ -75,6 +81,26 @@ SELECT invitation_id, org_id, email, role, invited_by_user_id, token_hash, statu
 FROM invitations
 WHERE invitation_id = ?1
 LIMIT 1
+"#;
+
+const INVITATIONS_BY_ORG_SQL: &str = r#"
+SELECT invitation_id, org_id, email, role, invited_by_user_id, token_hash, status, expires_at, accepted_by_user_id, accepted_at, created_at, updated_at
+FROM invitations
+WHERE org_id = ?1 AND status IN ('pending', 'accepted', 'expired', 'revoked')
+ORDER BY created_at DESC, invitation_id DESC
+LIMIT ?2 OFFSET ?3
+"#;
+
+const REVOKE_INVITATION_SQL: &str = r#"
+UPDATE invitations
+SET status = 'revoked', updated_at = ?3
+WHERE invitation_id = ?1 AND org_id = ?2 AND status = 'pending' AND expires_at > ?3
+"#;
+
+const ROTATE_INVITATION_SQL: &str = r#"
+UPDATE invitations
+SET token_hash = ?3, status = 'pending', expires_at = ?4, updated_at = ?5
+WHERE invitation_id = ?1 AND org_id = ?2 AND status IN ('pending', 'expired', 'revoked')
 "#;
 
 const ACCEPT_INVITATION_SQL: &str = r#"
@@ -355,12 +381,15 @@ impl<'a> OrganizationRepository<'a> {
                 self.insert_owner_membership_statement(membership_id, org_id, created_by, now)?,
             ])
             .await?;
-        self.find_organization(org_id)
-            .await?
-            .ok_or_else(|| worker::Error::RustError("created organization could not be read".into()))
+        self.find_organization(org_id).await?.ok_or_else(|| {
+            worker::Error::RustError("created organization could not be read".into())
+        })
     }
 
-    pub async fn find_organization(&self, org_id: &str) -> worker::Result<Option<OrganizationRecord>> {
+    pub async fn find_organization(
+        &self,
+        org_id: &str,
+    ) -> worker::Result<Option<OrganizationRecord>> {
         let row = self
             .database
             .prepare(ORG_BY_ID_SQL, &[BindValue::Text(org_id)])?
@@ -477,7 +506,11 @@ impl<'a> OrganizationRepository<'a> {
             )?
             .all()
             .await?;
-        result.results::<MembershipRow>()?.into_iter().map(TryInto::try_into).collect()
+        result
+            .results::<MembershipRow>()?
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect()
     }
 
     pub async fn update_organization(
@@ -505,6 +538,33 @@ impl<'a> OrganizationRepository<'a> {
         Ok(D1Adapter::changes(&result)? == 1)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_state(
+        &self,
+        org_id: &str,
+        expected_state: &str,
+        next_state: &str,
+        expected_version: i64,
+        now: &Timestamp,
+    ) -> worker::Result<bool> {
+        let result = self
+            .database
+            .prepare(
+                UPDATE_ORG_STATE_SQL,
+                &[
+                    BindValue::Text(org_id),
+                    BindValue::Text(next_state),
+                    BindValue::Text(now.as_str()),
+                    BindValue::Text(expected_state),
+                    BindValue::Integer(expected_version as i32),
+                ],
+            )?
+            .run()
+            .await?;
+        Ok(D1Adapter::changes(&result)? == 1)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_invitation_statement(
         &self,
         invitation_id: &str,
@@ -538,19 +598,92 @@ impl<'a> OrganizationRepository<'a> {
     ) -> worker::Result<Option<InvitationRecord>> {
         let row = self
             .database
-            .prepare(PENDING_INVITATION_SQL, &[BindValue::Text(org_id), BindValue::Text(email)])?
+            .prepare(
+                PENDING_INVITATION_SQL,
+                &[BindValue::Text(org_id), BindValue::Text(email)],
+            )?
             .first::<InvitationRow>(None)
             .await?;
         row.map(TryInto::try_into).transpose()
     }
 
-    pub async fn find_invitation(&self, invitation_id: &str) -> worker::Result<Option<InvitationRecord>> {
+    pub async fn find_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> worker::Result<Option<InvitationRecord>> {
         let row = self
             .database
             .prepare(INVITATION_BY_ID_SQL, &[BindValue::Text(invitation_id)])?
             .first::<InvitationRow>(None)
             .await?;
         row.map(TryInto::try_into).transpose()
+    }
+
+    pub async fn list_invitations(
+        &self,
+        org_id: &str,
+        limit: u16,
+        offset: u32,
+    ) -> worker::Result<Vec<InvitationRecord>> {
+        let result = self
+            .database
+            .prepare(
+                INVITATIONS_BY_ORG_SQL,
+                &[
+                    BindValue::Text(org_id),
+                    BindValue::Integer(i32::from(limit)),
+                    BindValue::Integer(offset as i32),
+                ],
+            )?
+            .all()
+            .await?;
+        result
+            .results::<InvitationRow>()?
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect()
+    }
+
+    pub async fn revoke_invitation(
+        &self,
+        invitation_id: &str,
+        org_id: &str,
+        now: &Timestamp,
+    ) -> worker::Result<bool> {
+        let result = self
+            .database
+            .prepare(
+                REVOKE_INVITATION_SQL,
+                &[
+                    BindValue::Text(invitation_id),
+                    BindValue::Text(org_id),
+                    BindValue::Text(now.as_str()),
+                ],
+            )?
+            .run()
+            .await?;
+        Ok(D1Adapter::changes(&result)? == 1)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn rotate_invitation_statement(
+        &self,
+        invitation_id: &str,
+        org_id: &str,
+        token_hash: &str,
+        expires_at: &Timestamp,
+        now: &Timestamp,
+    ) -> worker::Result<D1PreparedStatement> {
+        self.database.prepare(
+            ROTATE_INVITATION_SQL,
+            &[
+                BindValue::Text(invitation_id),
+                BindValue::Text(org_id),
+                BindValue::Text(token_hash),
+                BindValue::Text(expires_at.as_str()),
+                BindValue::Text(now.as_str()),
+            ],
+        )
     }
 
     pub fn accept_invitation_statement(
@@ -571,6 +704,7 @@ impl<'a> OrganizationRepository<'a> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_invited_membership_statement(
         &self,
         membership_id: &str,
@@ -689,7 +823,12 @@ impl<'a> OrganizationRepository<'a> {
         )
     }
 
-    pub async fn list_teams(&self, org_id: &str, limit: u16, offset: u32) -> worker::Result<Vec<TeamRecord>> {
+    pub async fn list_teams(
+        &self,
+        org_id: &str,
+        limit: u16,
+        offset: u32,
+    ) -> worker::Result<Vec<TeamRecord>> {
         let result = self
             .database
             .prepare(
@@ -702,7 +841,11 @@ impl<'a> OrganizationRepository<'a> {
             )?
             .all()
             .await?;
-        result.results::<TeamRow>()?.into_iter().map(TryInto::try_into).collect()
+        result
+            .results::<TeamRow>()?
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect()
     }
 
     pub async fn add_team_member(
@@ -730,7 +873,12 @@ impl<'a> OrganizationRepository<'a> {
         Ok(D1Adapter::changes(&result)? == 1)
     }
 
-    pub async fn remove_team_member(&self, org_id: &str, team_id: &str, membership_id: &str) -> worker::Result<bool> {
+    pub async fn remove_team_member(
+        &self,
+        org_id: &str,
+        team_id: &str,
+        membership_id: &str,
+    ) -> worker::Result<bool> {
         let result = self
             .database
             .prepare(
@@ -750,34 +898,91 @@ impl<'a> OrganizationRepository<'a> {
 impl TryFrom<OrgRow> for OrganizationRecord {
     type Error = worker::Error;
     fn try_from(row: OrgRow) -> Result<Self, Self::Error> {
-        Ok(Self { org_id: row.org_id, display_name: row.display_name, slug: row.slug, state: row.state, version: row.version, created_by_user_id: row.created_by_user_id, created_at: row.created_at, updated_at: row.updated_at })
+        Ok(Self {
+            org_id: row.org_id,
+            display_name: row.display_name,
+            slug: row.slug,
+            state: row.state,
+            version: row.version,
+            created_by_user_id: row.created_by_user_id,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
     }
 }
 
 impl TryFrom<OrgSummaryRow> for OrganizationSummary {
     type Error = worker::Error;
     fn try_from(row: OrgSummaryRow) -> Result<Self, Self::Error> {
-        Ok(Self { organization: OrganizationRecord { org_id: row.org_id, display_name: row.display_name, slug: row.slug, state: row.state, version: row.version, created_by_user_id: row.created_by_user_id, created_at: row.created_at, updated_at: row.updated_at }, membership_id: row.membership_id, role: row.role, status: row.status, membership_version: row.membership_version })
+        Ok(Self {
+            organization: OrganizationRecord {
+                org_id: row.org_id,
+                display_name: row.display_name,
+                slug: row.slug,
+                state: row.state,
+                version: row.version,
+                created_by_user_id: row.created_by_user_id,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            },
+            membership_id: row.membership_id,
+            role: row.role,
+            status: row.status,
+            membership_version: row.membership_version,
+        })
     }
 }
 
 impl TryFrom<MembershipRow> for MembershipRecord {
     type Error = worker::Error;
     fn try_from(row: MembershipRow) -> Result<Self, Self::Error> {
-        Ok(Self { membership_id: row.membership_id, org_id: row.org_id, user_id: row.user_id, role: row.role, status: row.status, version: row.version, invited_by_user_id: row.invited_by_user_id, joined_at: row.joined_at, created_at: row.created_at, updated_at: row.updated_at })
+        Ok(Self {
+            membership_id: row.membership_id,
+            org_id: row.org_id,
+            user_id: row.user_id,
+            role: row.role,
+            status: row.status,
+            version: row.version,
+            invited_by_user_id: row.invited_by_user_id,
+            joined_at: row.joined_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
     }
 }
 
 impl TryFrom<InvitationRow> for InvitationRecord {
     type Error = worker::Error;
     fn try_from(row: InvitationRow) -> Result<Self, Self::Error> {
-        Ok(Self { invitation_id: row.invitation_id, org_id: row.org_id, email: row.email, role: row.role, invited_by_user_id: row.invited_by_user_id, token_hash: row.token_hash, status: row.status, expires_at: row.expires_at, accepted_by_user_id: row.accepted_by_user_id, accepted_at: row.accepted_at, created_at: row.created_at, updated_at: row.updated_at })
+        Ok(Self {
+            invitation_id: row.invitation_id,
+            org_id: row.org_id,
+            email: row.email,
+            role: row.role,
+            invited_by_user_id: row.invited_by_user_id,
+            token_hash: row.token_hash,
+            status: row.status,
+            expires_at: row.expires_at,
+            accepted_by_user_id: row.accepted_by_user_id,
+            accepted_at: row.accepted_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
     }
 }
 
 impl TryFrom<TeamRow> for TeamRecord {
     type Error = worker::Error;
     fn try_from(row: TeamRow) -> Result<Self, Self::Error> {
-        Ok(Self { team_id: row.team_id, org_id: row.org_id, display_name: row.display_name, slug: row.slug, created_by_user_id: row.created_by_user_id, version: row.version, created_at: row.created_at, updated_at: row.updated_at })
+        Ok(Self {
+            team_id: row.team_id,
+            org_id: row.org_id,
+            display_name: row.display_name,
+            slug: row.slug,
+            created_by_user_id: row.created_by_user_id,
+            version: row.version,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
     }
 }

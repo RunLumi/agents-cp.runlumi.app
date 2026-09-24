@@ -102,6 +102,7 @@ pub enum Permission {
     OrgRead,
     OrgManage,
     OrgOwnershipTransfer,
+    OrgLifecycle,
     MembersRead,
     MembersManage,
     TeamsRead,
@@ -116,6 +117,7 @@ impl Permission {
             "org.read" => Self::OrgRead,
             "org.manage" => Self::OrgManage,
             "org.ownership_transfer" => Self::OrgOwnershipTransfer,
+            "org.lifecycle" => Self::OrgLifecycle,
             "members.read" => Self::MembersRead,
             "members.manage" => Self::MembersManage,
             "teams.read" => Self::TeamsRead,
@@ -130,6 +132,7 @@ impl Permission {
             Self::OrgRead => "org.read",
             Self::OrgManage => "org.manage",
             Self::OrgOwnershipTransfer => "org.ownership_transfer",
+            Self::OrgLifecycle => "org.lifecycle",
             Self::MembersRead => "members.read",
             Self::MembersManage => "members.manage",
             Self::TeamsRead => "teams.read",
@@ -140,7 +143,10 @@ impl Permission {
     }
 
     fn requires_verified_email(&self) -> bool {
-        !matches!(self, Self::OrgRead | Self::MembersRead | Self::TeamsRead | Self::AuditRead)
+        !matches!(
+            self,
+            Self::OrgRead | Self::MembersRead | Self::TeamsRead | Self::AuditRead
+        )
     }
 }
 
@@ -287,16 +293,18 @@ pub fn authorize(
     }
 
     match organization.state {
-        OrganizationState::Suspended => {
+        OrganizationState::Suspended if !matches!(permission, Permission::OrgLifecycle) => {
             return AuthorizationDecision::Deny(DenyReason::OrganizationSuspended);
         }
-        OrganizationState::PendingDeletion => {
+        OrganizationState::PendingDeletion if !matches!(permission, Permission::OrgLifecycle) => {
             return AuthorizationDecision::Deny(DenyReason::OrganizationPendingDeletion);
         }
         OrganizationState::Deleted => {
             return AuthorizationDecision::Deny(DenyReason::OrganizationDeleted);
         }
-        OrganizationState::Active => {}
+        OrganizationState::Active
+        | OrganizationState::Suspended
+        | OrganizationState::PendingDeletion => {}
     }
 
     if let Some(resource) = resource
@@ -327,13 +335,14 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
         ),
         MembershipRole::Member => matches!(
             permission,
-            Permission::OrgRead
-                | Permission::MembersRead
-                | Permission::TeamsRead
+            Permission::OrgRead | Permission::MembersRead | Permission::TeamsRead
         ),
         MembershipRole::Viewer => matches!(
             permission,
-            Permission::OrgRead | Permission::MembersRead | Permission::TeamsRead | Permission::AuditRead
+            Permission::OrgRead
+                | Permission::MembersRead
+                | Permission::TeamsRead
+                | Permission::AuditRead
         ),
     }
 }
@@ -355,14 +364,25 @@ mod tests {
     fn principal(verified: bool) -> (Principal, OrganizationId, UserId, MembershipId) {
         let (org, user, membership, session) = ids();
         (
-            Principal::new(user.clone(), session, "person@example.com", "Person", verified),
+            Principal::new(
+                user.clone(),
+                session,
+                "person@example.com",
+                "Person",
+                verified,
+            ),
             org,
             user,
             membership,
         )
     }
 
-    fn make_membership(org: OrganizationId, user: UserId, id: MembershipId, role: MembershipRole) -> MembershipSnapshot {
+    fn make_membership(
+        org: OrganizationId,
+        user: UserId,
+        id: MembershipId,
+        role: MembershipRole,
+    ) -> MembershipSnapshot {
         MembershipSnapshot {
             membership_id: id,
             organization_id: org,
@@ -376,53 +396,163 @@ mod tests {
     #[test]
     fn owner_can_manage_and_unknown_permission_denies() {
         let (user, org, user_id, membership_id) = principal(true);
-        let organization = OrganizationContext { organization_id: org.clone(), state: OrganizationState::Active, version: 1 };
+        let organization = OrganizationContext {
+            organization_id: org.clone(),
+            state: OrganizationState::Active,
+            version: 1,
+        };
         let membership = make_membership(org, user_id, membership_id, MembershipRole::Owner);
-        assert_eq!(authorize(Some(&user), &organization, Some(&membership), &Permission::OrgManage, None), AuthorizationDecision::Allow);
-        assert_eq!(authorize(Some(&user), &organization, Some(&membership), &Permission::parse("made.up"), None), AuthorizationDecision::Deny(DenyReason::UnknownPermission));
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&membership),
+                &Permission::OrgManage,
+                None
+            ),
+            AuthorizationDecision::Allow
+        );
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&membership),
+                &Permission::parse("made.up"),
+                None
+            ),
+            AuthorizationDecision::Deny(DenyReason::UnknownPermission)
+        );
     }
 
     #[test]
     fn viewer_cannot_manage_members() {
         let (user, org, user_id, membership_id) = principal(true);
-        let organization = OrganizationContext { organization_id: org.clone(), state: OrganizationState::Active, version: 1 };
+        let organization = OrganizationContext {
+            organization_id: org.clone(),
+            state: OrganizationState::Active,
+            version: 1,
+        };
         let membership = make_membership(org, user_id, membership_id, MembershipRole::Viewer);
-        assert_eq!(authorize(Some(&user), &organization, Some(&membership), &Permission::MembersManage, None), AuthorizationDecision::Deny(DenyReason::PermissionDenied));
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&membership),
+                &Permission::MembersManage,
+                None
+            ),
+            AuthorizationDecision::Deny(DenyReason::PermissionDenied)
+        );
     }
 
     #[test]
     fn stale_removed_membership_and_cross_tenant_scope_deny() {
         let (user, org, user_id, membership_id) = principal(true);
-        let organization = OrganizationContext { organization_id: org.clone(), state: OrganizationState::Active, version: 1 };
-        let mut stale = make_membership(org.clone(), user_id.clone(), membership_id.clone(), MembershipRole::Admin);
+        let organization = OrganizationContext {
+            organization_id: org.clone(),
+            state: OrganizationState::Active,
+            version: 1,
+        };
+        let mut stale = make_membership(
+            org.clone(),
+            user_id.clone(),
+            membership_id.clone(),
+            MembershipRole::Admin,
+        );
         stale.status = MembershipStatus::Removed;
-        assert_eq!(authorize(Some(&user), &organization, Some(&stale), &Permission::OrgRead, None), AuthorizationDecision::Deny(DenyReason::MembershipRequired));
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&stale),
+                &Permission::OrgRead,
+                None
+            ),
+            AuthorizationDecision::Deny(DenyReason::MembershipRequired)
+        );
 
         let other_org: OrganizationId = "org_1123456789abcdef0123456789abcdef".parse().unwrap();
         let other = make_membership(other_org, user_id, membership_id, MembershipRole::Owner);
-        assert_eq!(authorize(Some(&user), &organization, Some(&other), &Permission::OrgRead, None), AuthorizationDecision::Deny(DenyReason::ResourceScopeMismatch));
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&other),
+                &Permission::OrgRead,
+                None
+            ),
+            AuthorizationDecision::Deny(DenyReason::ResourceScopeMismatch)
+        );
     }
 
     #[test]
     fn unverified_mutation_and_suspended_org_are_denied() {
         let (user, org, user_id, membership_id) = principal(false);
-        let organization = OrganizationContext { organization_id: org.clone(), state: OrganizationState::Active, version: 1 };
+        let organization = OrganizationContext {
+            organization_id: org.clone(),
+            state: OrganizationState::Active,
+            version: 1,
+        };
         let membership = make_membership(org, user_id, membership_id, MembershipRole::Owner);
-        assert_eq!(authorize(Some(&user), &organization, Some(&membership), &Permission::MembersManage, None), AuthorizationDecision::Deny(DenyReason::EmailVerificationRequired));
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&membership),
+                &Permission::MembersManage,
+                None
+            ),
+            AuthorizationDecision::Deny(DenyReason::EmailVerificationRequired)
+        );
 
         let (user, org, user_id, membership_id) = principal(true);
-        let organization = OrganizationContext { organization_id: org, state: OrganizationState::Suspended, version: 2 };
-        let snapshot = make_membership(organization.organization_id.clone(), user_id, membership_id, MembershipRole::Owner);
-        assert_eq!(authorize(Some(&user), &organization, Some(&snapshot), &Permission::OrgRead, None), AuthorizationDecision::Deny(DenyReason::OrganizationSuspended));
+        let organization = OrganizationContext {
+            organization_id: org,
+            state: OrganizationState::Suspended,
+            version: 2,
+        };
+        let snapshot = make_membership(
+            organization.organization_id.clone(),
+            user_id,
+            membership_id,
+            MembershipRole::Owner,
+        );
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&snapshot),
+                &Permission::OrgRead,
+                None
+            ),
+            AuthorizationDecision::Deny(DenyReason::OrganizationSuspended)
+        );
     }
 
     #[test]
     fn resource_from_another_org_cannot_be_authorized_by_membership() {
         let (user, org, user_id, membership_id) = principal(true);
-        let organization = OrganizationContext { organization_id: org.clone(), state: OrganizationState::Active, version: 1 };
+        let organization = OrganizationContext {
+            organization_id: org.clone(),
+            state: OrganizationState::Active,
+            version: 1,
+        };
         let membership = make_membership(org, user_id, membership_id, MembershipRole::Owner);
         let resource_org: OrganizationId = "org_1123456789abcdef0123456789abcdef".parse().unwrap();
-        let resource = ResourceContext { resource_type: "member".into(), resource_id: "mem_1123456789abcdef0123456789abcdef".into(), organization_id: resource_org };
-        assert_eq!(authorize(Some(&user), &organization, Some(&membership), &Permission::MembersRead, Some(&resource)), AuthorizationDecision::Deny(DenyReason::ResourceScopeMismatch));
+        let resource = ResourceContext {
+            resource_type: "member".into(),
+            resource_id: "mem_1123456789abcdef0123456789abcdef".into(),
+            organization_id: resource_org,
+        };
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&membership),
+                &Permission::MembersRead,
+                Some(&resource)
+            ),
+            AuthorizationDecision::Deny(DenyReason::ResourceScopeMismatch)
+        );
     }
 }

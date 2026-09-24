@@ -19,7 +19,7 @@ Every implementation agent reads, in order:
 |---|---|---|
 | P00 | Multi-agent execution model | Active |
 | P01 | Foundation, contracts, storage | Complete |
-| P02 | Identity, organization, authorization | Ready |
+| P02 | Identity, organization, authorization | Active (`p02-cg-v1`) |
 | P03 | Device, project, policy sync | Blocked by P02 |
 | P04 | AI platform, catalog, secrets, inference | Blocked by P02 |
 | P05 | Runs, tools, usage, control | Blocked by P03 + P04 |

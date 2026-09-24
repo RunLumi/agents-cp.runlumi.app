@@ -14,16 +14,15 @@ use crate::{
     adapters::{add_seconds, new_resource_id, new_secret, sha256_hex},
     app::AppState,
     core::{ApiError, ApiErrorCode, Principal, RequestContext},
-    http::auth::{
-        clear_session_cookies, require_csrf, require_session, set_session_cookies,
-    },
+    http::auth::{clear_session_cookies, require_csrf, require_session, set_session_cookies},
     modules::identity::{ChallengeKind, NormalizedEmail, validate_display_name},
-    repositories::{
-        IdentityRepository, SecurityEventInput, SecurityEventRepository, UserRecord,
-    },
+    repositories::{IdentityRepository, SecurityEventInput, SecurityEventRepository, UserRecord},
     routes::{
         errors,
-        support::{database, database_error, domain_error, is_development, outbox_statement, secure_cookie, user_json},
+        support::{
+            database, database_error, domain_error, is_development, outbox_statement,
+            secure_cookie, user_json,
+        },
     },
 };
 
@@ -57,6 +56,14 @@ pub struct LoginCompleteRequest {
     pub code: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkIdentityRequest {
+    pub email: String,
+    pub reauth_grant_id: String,
+    pub reauth_token: String,
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct EmptyRequest {}
@@ -88,8 +95,16 @@ pub async fn signup(
     Json(body): Json<SignupRequest>,
 ) -> Result<Response<Body>, ApiError> {
     let database = database(&state, &context)?;
-    let email = NormalizedEmail::parse(&body.email).map_err(|_| validation_error(&context, "email_invalid", "Enter a valid email address."))?;
-    let display_name = validate_display_name(&body.display_name).map_err(|_| validation_error(&context, "display_name_invalid", "Enter a valid display name."))?;
+    let email = NormalizedEmail::parse(&body.email)
+        .map_err(|_| validation_error(&context, "email_invalid", "Enter a valid email address."))?;
+    enforce_rate_limit(&state, &context, &format!("signup:{}", email.as_str()), 5).await?;
+    let display_name = validate_display_name(&body.display_name).map_err(|_| {
+        validation_error(
+            &context,
+            "display_name_invalid",
+            "Enter a valid display name.",
+        )
+    })?;
     let repository = IdentityRepository::new(database);
     if repository
         .find_user_by_email(email.as_str())
@@ -116,7 +131,12 @@ pub async fn signup(
     let expires_at = add_seconds(&context.received_at, CHALLENGE_TTL_SECONDS)
         .map_err(|_| service_unavailable(&context))?;
     let user_statement = repository
-        .insert_user_statement(&user_id, email.as_str(), &display_name, &context.received_at)
+        .insert_user_statement(
+            &user_id,
+            email.as_str(),
+            &display_name,
+            &context.received_at,
+        )
         .map_err(|error| database_error(&context, error))?;
     let identity_statement = repository
         .insert_identity_statement(&identity_id, &user_id, email.as_str(), &context.received_at)
@@ -145,7 +165,12 @@ pub async fn signup(
         json!({ "provider": "email" }),
     )?;
     database
-        .batch(vec![user_statement, identity_statement, challenge_statement, security_statement])
+        .batch(vec![
+            user_statement,
+            identity_statement,
+            challenge_statement,
+            security_statement,
+        ])
         .await
         .map_err(|error| database_error(&context, error))?;
     let user = repository
@@ -159,7 +184,14 @@ pub async fn signup(
         expires_at: expires_at.as_str().to_owned(),
         development_code: is_development(&state).then_some(code),
     };
-    Ok((StatusCode::CREATED, Json(UserResponse { user: user_json(&user), verification: Some(verification) })).into_response())
+    Ok((
+        StatusCode::CREATED,
+        Json(UserResponse {
+            user: user_json(&user),
+            verification: Some(verification),
+        }),
+    )
+        .into_response())
 }
 
 #[worker::send]
@@ -174,27 +206,61 @@ pub async fn verify_email(
         .find_challenge(&body.challenge_id)
         .await
         .map_err(|error| database_error(&context, error))?
-        .ok_or_else(|| authentication_error(&context, "verification_invalid", "The verification link is invalid or expired."))?;
-    let user_id = challenge.user_id.clone().ok_or_else(|| authentication_error(&context, "verification_invalid", "The verification link is invalid or expired."))?;
+        .ok_or_else(|| {
+            authentication_error(
+                &context,
+                "verification_invalid",
+                "The verification link is invalid or expired.",
+            )
+        })?;
+    let user_id = challenge.user_id.clone().ok_or_else(|| {
+        authentication_error(
+            &context,
+            "verification_invalid",
+            "The verification link is invalid or expired.",
+        )
+    })?;
     if challenge.kind != ChallengeKind::Verification.as_str() {
-        return Err(authentication_error(&context, "verification_invalid", "The verification link is invalid or expired."));
+        return Err(authentication_error(
+            &context,
+            "verification_invalid",
+            "The verification link is invalid or expired.",
+        ));
     }
-    if challenge.status == "consumed" {
-        if let Some(user) = repository.find_user_by_id(&user_id).await.map_err(|error| database_error(&context, error))? {
-            return Ok(Json(UserOnlyResponse { user: user_json(&user) }).into_response());
-        }
+    if challenge.status == "consumed"
+        && let Some(user) = repository
+            .find_user_by_id(&user_id)
+            .await
+            .map_err(|error| database_error(&context, error))?
+    {
+        return Ok(Json(UserOnlyResponse {
+            user: user_json(&user),
+        })
+        .into_response());
     }
     if challenge.status != "pending" {
-        return Err(authentication_error(&context, "verification_expired", "The verification link is invalid or expired."));
+        return Err(authentication_error(
+            &context,
+            "verification_expired",
+            "The verification link is invalid or expired.",
+        ));
     }
-    let code_hash = sha256_hex(&body.code).await.map_err(|_| service_unavailable(&context))?;
+    let code_hash = sha256_hex(&body.code)
+        .await
+        .map_err(|_| service_unavailable(&context))?;
     if !repository
         .consume_challenge(&challenge.challenge_id, &code_hash, &context.received_at)
         .await
         .map_err(|error| database_error(&context, error))?
     {
-        let _ = repository.record_failed_challenge(&challenge.challenge_id).await;
-        return Err(authentication_error(&context, "verification_invalid", "The verification link is invalid or expired."));
+        let _ = repository
+            .record_failed_challenge(&challenge.challenge_id)
+            .await;
+        return Err(authentication_error(
+            &context,
+            "verification_invalid",
+            "The verification link is invalid or expired.",
+        ));
     }
     let event_id = generated_id("sec");
     let security_statement = security_statement(
@@ -213,13 +279,19 @@ pub async fn verify_email(
         .verify_user_statements(&user_id, &challenge.email, &context.received_at)
         .map_err(|error| database_error(&context, error))?;
     statements.push(security_statement);
-    database.batch(statements).await.map_err(|error| database_error(&context, error))?;
+    database
+        .batch(statements)
+        .await
+        .map_err(|error| database_error(&context, error))?;
     let user = repository
         .find_user_by_id(&user_id)
         .await
         .map_err(|error| database_error(&context, error))?
         .ok_or_else(|| service_unavailable(&context))?;
-    Ok(Json(UserOnlyResponse { user: user_json(&user) }).into_response())
+    Ok(Json(UserOnlyResponse {
+        user: user_json(&user),
+    })
+    .into_response())
 }
 
 #[worker::send]
@@ -229,7 +301,9 @@ pub async fn login_start(
     Json(body): Json<LoginStartRequest>,
 ) -> Result<Response<Body>, ApiError> {
     let database = database(&state, &context)?;
-    let email = NormalizedEmail::parse(&body.email).map_err(|_| validation_error(&context, "email_invalid", "Enter a valid email address."))?;
+    let email = NormalizedEmail::parse(&body.email)
+        .map_err(|_| validation_error(&context, "email_invalid", "Enter a valid email address."))?;
+    enforce_rate_limit(&state, &context, &format!("login:{}", email.as_str()), 10).await?;
     let repository = IdentityRepository::new(database);
     let user = repository
         .find_user_by_email(email.as_str())
@@ -237,8 +311,11 @@ pub async fn login_start(
         .map_err(|error| database_error(&context, error))?;
     let challenge_id = generated_id("idn");
     let code = new_secret();
-    let code_hash = sha256_hex(&code).await.map_err(|_| service_unavailable(&context))?;
-    let expires_at = add_seconds(&context.received_at, CHALLENGE_TTL_SECONDS).map_err(|_| service_unavailable(&context))?;
+    let code_hash = sha256_hex(&code)
+        .await
+        .map_err(|_| service_unavailable(&context))?;
+    let expires_at = add_seconds(&context.received_at, CHALLENGE_TTL_SECONDS)
+        .map_err(|_| service_unavailable(&context))?;
     let statement = repository
         .insert_challenge_statement(
             &challenge_id,
@@ -250,7 +327,10 @@ pub async fn login_start(
             &context.received_at,
         )
         .map_err(|error| database_error(&context, error))?;
-    database.batch(vec![statement]).await.map_err(|error| database_error(&context, error))?;
+    database
+        .batch(vec![statement])
+        .await
+        .map_err(|error| database_error(&context, error))?;
     let response = ChallengeResponse {
         challenge_id,
         expires_at: expires_at.as_str().to_owned(),
@@ -272,27 +352,55 @@ pub async fn login_complete(
         .find_challenge(&body.challenge_id)
         .await
         .map_err(|error| database_error(&context, error))?
-        .ok_or_else(|| authentication_error(&context, "login_invalid", "The sign-in link is invalid or expired."))?;
+        .ok_or_else(|| {
+            authentication_error(
+                &context,
+                "login_invalid",
+                "The sign-in link is invalid or expired.",
+            )
+        })?;
     if challenge.kind != ChallengeKind::Login.as_str() || challenge.status != "pending" {
-        return Err(authentication_error(&context, "login_invalid", "The sign-in link is invalid or expired."));
+        return Err(authentication_error(
+            &context,
+            "login_invalid",
+            "The sign-in link is invalid or expired.",
+        ));
     }
     let Some(user_id) = challenge.user_id.as_deref() else {
-        return Err(authentication_error(&context, "login_invalid", "The sign-in link is invalid or expired."));
+        return Err(authentication_error(
+            &context,
+            "login_invalid",
+            "The sign-in link is invalid or expired.",
+        ));
     };
-    let code_hash = sha256_hex(&body.code).await.map_err(|_| service_unavailable(&context))?;
+    let code_hash = sha256_hex(&body.code)
+        .await
+        .map_err(|_| service_unavailable(&context))?;
     if !repository
         .consume_challenge(&challenge.challenge_id, &code_hash, &context.received_at)
         .await
         .map_err(|error| database_error(&context, error))?
     {
-        let _ = repository.record_failed_challenge(&challenge.challenge_id).await;
-        return Err(authentication_error(&context, "login_invalid", "The sign-in link is invalid or expired."));
+        let _ = repository
+            .record_failed_challenge(&challenge.challenge_id)
+            .await;
+        return Err(authentication_error(
+            &context,
+            "login_invalid",
+            "The sign-in link is invalid or expired.",
+        ));
     }
     let user = repository
         .find_user_by_id(user_id)
         .await
         .map_err(|error| database_error(&context, error))?
-        .ok_or_else(|| authentication_error(&context, "login_invalid", "The sign-in link is invalid or expired."))?;
+        .ok_or_else(|| {
+            authentication_error(
+                &context,
+                "login_invalid",
+                "The sign-in link is invalid or expired.",
+            )
+        })?;
     let (response, session_token, csrf_token) = create_session(
         &state,
         &context,
@@ -301,10 +409,16 @@ pub async fn login_complete(
         &user,
         &headers,
         "auth.login.completed.v1",
+        None,
     )
     .await?;
     let mut response = response;
-    set_session_cookies(&mut response, &session_token, &csrf_token, secure_cookie(&state));
+    set_session_cookies(
+        &mut response,
+        &session_token,
+        &csrf_token,
+        secure_cookie(&state),
+    );
     Ok(response)
 }
 
@@ -334,11 +448,18 @@ pub async fn logout(
     )?;
     let statements = vec![
         repository
-            .revoke_session_statement(&authenticated.session.session_id, &context.received_at, "user_logout")
+            .revoke_session_statement(
+                &authenticated.session.session_id,
+                &context.received_at,
+                "user_logout",
+            )
             .map_err(|error| database_error(&context, error))?,
         security_statement,
     ];
-    database.batch(statements).await.map_err(|error| database_error(&context, error))?;
+    database
+        .batch(statements)
+        .await
+        .map_err(|error| database_error(&context, error))?;
     let mut response = StatusCode::NO_CONTENT.into_response();
     clear_session_cookies(&mut response, secure_cookie(&state));
     Ok(response)
@@ -356,7 +477,7 @@ pub async fn refresh(
     let database = database(&state, &context)?;
     let repository = IdentityRepository::new(database);
     let user = repository
-        .find_user_by_id(&authenticated.principal.user_id.as_str())
+        .find_user_by_id(authenticated.principal.user_id.as_str())
         .await
         .map_err(|error| database_error(&context, error))?
         .ok_or_else(|| authentication_error(&context, "session_revoked", "Sign in again."))?;
@@ -368,33 +489,111 @@ pub async fn refresh(
         &user,
         &headers,
         "auth.session.rotated.v1",
+        Some(&authenticated.session.session_id),
     )
     .await?;
+    set_session_cookies(
+        &mut response,
+        &session_token,
+        &csrf_token,
+        secure_cookie(&state),
+    );
+    Ok(response)
+}
+
+#[worker::send]
+pub async fn link_identity(
+    State(state): State<Arc<AppState>>,
+    Extension(context): Extension<RequestContext>,
+    headers: HeaderMap,
+    Json(body): Json<LinkIdentityRequest>,
+) -> Result<Response<Body>, ApiError> {
+    let authenticated = require_session(&state, &headers, &context).await?;
+    require_csrf(&headers, &authenticated.session, &context).await?;
+    let email = NormalizedEmail::parse(&body.email)
+        .map_err(|_| validation_error(&context, "email_invalid", "Enter a valid email address."))?;
+    let database = database(&state, &context)?;
+    let repository = IdentityRepository::new(database);
+    if let Some(existing) = repository
+        .find_user_by_email(email.as_str())
+        .await
+        .map_err(|error| database_error(&context, error))?
+    {
+        if existing.user_id != authenticated.principal.user_id.as_str() {
+            return Err(domain_error(
+                &context,
+                ApiErrorCode::Conflict,
+                "identity_conflict",
+                "That identity belongs to another account.",
+            ));
+        }
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::Conflict,
+            "identity_conflict",
+            "That identity is already linked.",
+        ));
+    }
+    let reauth_hash = sha256_hex(&body.reauth_token)
+        .await
+        .map_err(|_| service_unavailable(&context))?;
+    if !repository
+        .consume_reauth(
+            &body.reauth_grant_id,
+            authenticated.principal.user_id.as_str(),
+            authenticated.principal.session_id.as_str(),
+            "identity_link",
+            &reauth_hash,
+            &context.received_at,
+        )
+        .await
+        .map_err(|error| database_error(&context, error))?
+    {
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::PermissionDenied,
+            "reauthentication_required",
+            "Complete a recent security check before linking an identity.",
+        ));
+    }
+    let identity_id = generated_id("idn");
+    let statement = repository
+        .link_identity_statement(
+            &identity_id,
+            authenticated.principal.user_id.as_str(),
+            "email",
+            email.as_str(),
+            email.as_str(),
+            &context.received_at,
+        )
+        .map_err(|error| database_error(&context, error))?;
     let event_id = generated_id("sec");
+    let metadata = json!({ "provider": "email" });
     let security_statement = security_statement(
         database,
         &context,
         Some(&authenticated.principal),
         &event_id,
         None,
-        "auth.session.rotated.v1",
-        "session",
-        Some(&authenticated.session.session_id),
+        "identity.linked.v1",
+        "identity",
+        Some(&identity_id),
         "success",
-        json!({ "scope": "web" }),
+        metadata.clone(),
     )?;
-    let revoke = repository
-        .revoke_session_statement(&authenticated.session.session_id, &context.received_at, "rotated")
-        .map_err(|error| database_error(&context, error))?;
-    // The new session is already inserted by create_session; a second audit row
-    // is appended in its own bounded batch. The old session is revoked in the
-    // same transaction as the audit so a retry cannot refresh it.
+    let outbox = outbox_statement(
+        database,
+        &context,
+        Some(&authenticated.principal),
+        None,
+        "identity.linked.v1",
+        &metadata,
+    )?;
     database
-        .batch(vec![revoke, security_statement])
+        .batch(vec![statement, security_statement, outbox])
         .await
         .map_err(|error| database_error(&context, error))?;
-    set_session_cookies(&mut response, &session_token, &csrf_token, secure_cookie(&state));
-    Ok(response)
+    Ok((StatusCode::CREATED, Json(json!({ "identity": { "id": identity_id, "provider": "email", "email": email.as_str(), "email_verified": true } }))).into_response())
 }
 
 #[worker::send]
@@ -417,6 +616,7 @@ pub async fn me(
     Ok(Json(json!({ "user": user_json(&user), "organizations": organizations })).into_response())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_session(
     _state: &Arc<AppState>,
     context: &RequestContext,
@@ -425,15 +625,29 @@ async fn create_session(
     user: &UserRecord,
     headers: &HeaderMap,
     action: &str,
+    previous_session_id: Option<&str>,
 ) -> Result<(Response<Body>, String, String), ApiError> {
     let session_id = generated_id("ses");
     let session_token = new_secret();
     let csrf_token = new_secret();
-    let token_hash = sha256_hex(&session_token).await.map_err(|_| service_unavailable(context))?;
-    let csrf_hash = sha256_hex(&csrf_token).await.map_err(|_| service_unavailable(context))?;
-    let expires_at = add_seconds(&context.received_at, SESSION_TTL_SECONDS).map_err(|_| service_unavailable(context))?;
-    let device_label = headers.get("x-device-label").and_then(|value| value.to_str().ok()).filter(|value| !value.is_empty()).unwrap_or("Browser");
-    let platform = headers.get("x-platform").and_then(|value| value.to_str().ok()).filter(|value| !value.is_empty()).unwrap_or("web");
+    let token_hash = sha256_hex(&session_token)
+        .await
+        .map_err(|_| service_unavailable(context))?;
+    let csrf_hash = sha256_hex(&csrf_token)
+        .await
+        .map_err(|_| service_unavailable(context))?;
+    let expires_at = add_seconds(&context.received_at, SESSION_TTL_SECONDS)
+        .map_err(|_| service_unavailable(context))?;
+    let device_label = headers
+        .get("x-device-label")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Browser");
+    let platform = headers
+        .get("x-platform")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("web");
     let statement = repository
         .insert_session_statement(
             &session_id,
@@ -466,14 +680,37 @@ async fn create_session(
         "success",
         json!({ "scope": "web" }),
     )?;
-    let outbox = outbox_statement(database, context, Some(&principal), None, action, &json!({ "scope": "web" }))?;
+    let outbox = outbox_statement(
+        database,
+        context,
+        Some(&principal),
+        None,
+        action,
+        &json!({ "scope": "web" }),
+    )?;
+    let mut statements = vec![statement, security_statement, outbox];
+    if let Some(previous_session_id) = previous_session_id {
+        statements.push(
+            repository
+                .revoke_session_statement(previous_session_id, &context.received_at, "rotated")
+                .map_err(|error| database_error(context, error))?,
+        );
+    }
     database
-        .batch(vec![statement, security_statement, outbox])
+        .batch(statements)
         .await
         .map_err(|error| database_error(context, error))?;
-    Ok((Json(UserOnlyResponse { user: user_json(user) }).into_response(), session_token, csrf_token))
+    Ok((
+        Json(UserOnlyResponse {
+            user: user_json(user),
+        })
+        .into_response(),
+        session_token,
+        csrf_token,
+    ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn security_statement<'a>(
     database: &'a crate::adapters::d1::D1Adapter,
     context: &RequestContext,
@@ -486,7 +723,15 @@ fn security_statement<'a>(
     outcome: &'a str,
     metadata: Value,
 ) -> Result<worker::d1::D1PreparedStatement, ApiError> {
-    let (actor_type, actor_id, effective_user_id, session_id) = principal.map_or(("anonymous", "", "", ""), |principal| ("user", principal.user_id.as_str(), principal.user_id.as_str(), principal.session_id.as_str()));
+    let (actor_type, actor_id, effective_user_id, session_id) =
+        principal.map_or(("anonymous", "", "", ""), |principal| {
+            (
+                "user",
+                principal.user_id.as_str(),
+                principal.user_id.as_str(),
+                principal.session_id.as_str(),
+            )
+        });
     let input = SecurityEventInput {
         event_id,
         organization_id,
@@ -514,11 +759,17 @@ fn generated_id(prefix: &str) -> String {
     new_resource_id(prefix).as_str().to_owned()
 }
 
-fn user_id_from_str(value: &str, context: &RequestContext) -> Result<crate::core::UserId, ApiError> {
+fn user_id_from_str(
+    value: &str,
+    context: &RequestContext,
+) -> Result<crate::core::UserId, ApiError> {
     crate::core::UserId::new(value).map_err(|_| service_unavailable(context))
 }
 
-fn session_id_from_str(value: &str, context: &RequestContext) -> Result<crate::core::SessionId, ApiError> {
+fn session_id_from_str(
+    value: &str,
+    context: &RequestContext,
+) -> Result<crate::core::SessionId, ApiError> {
     crate::core::SessionId::new(value).map_err(|_| service_unavailable(context))
 }
 
@@ -527,9 +778,46 @@ fn validation_error(context: &RequestContext, reason: &str, message: &str) -> Ap
 }
 
 fn authentication_error(context: &RequestContext, reason: &str, message: &str) -> ApiError {
-    domain_error(context, ApiErrorCode::AuthenticationRequired, reason, message)
+    domain_error(
+        context,
+        ApiErrorCode::AuthenticationRequired,
+        reason,
+        message,
+    )
+}
+
+async fn enforce_rate_limit(
+    state: &Arc<AppState>,
+    context: &RequestContext,
+    bucket: &str,
+    limit: i64,
+) -> Result<(), ApiError> {
+    let database = database(state, context)?;
+    let key = sha256_hex(bucket)
+        .await
+        .map_err(|_| service_unavailable(context))?;
+    let expires_at =
+        add_seconds(&context.received_at, 15 * 60).map_err(|_| service_unavailable(context))?;
+    if IdentityRepository::new(database)
+        .allow_auth_attempt(&key, &context.received_at, &expires_at, limit)
+        .await
+        .map_err(|error| database_error(context, error))?
+    {
+        Ok(())
+    } else {
+        Err(domain_error(
+            context,
+            ApiErrorCode::RateLimited,
+            "rate_limited",
+            "Too many attempts. Try again later.",
+        ))
+    }
 }
 
 fn service_unavailable(context: &RequestContext) -> ApiError {
-    errors::api_error(context, ApiErrorCode::ServiceUnavailable, "The identity store is unavailable.")
+    errors::api_error(
+        context,
+        ApiErrorCode::ServiceUnavailable,
+        "The identity store is unavailable.",
+    )
 }

@@ -44,16 +44,14 @@ impl NormalizedEmail {
         let normalized = value.trim().to_ascii_lowercase();
         let valid = normalized.len() >= 3
             && normalized.len() <= 320
-            && normalized
-                .split_once('@')
-                .is_some_and(|(local, domain)| {
-                    !local.is_empty()
-                        && local.len() <= 64
-                        && domain.contains('.')
-                        && !domain.starts_with('.')
-                        && !domain.ends_with('.')
-                        && !domain.contains(char::is_whitespace)
-                });
+            && normalized.split_once('@').is_some_and(|(local, domain)| {
+                !local.is_empty()
+                    && local.len() <= 64
+                    && domain.contains('.')
+                    && !domain.starts_with('.')
+                    && !domain.ends_with('.')
+                    && !domain.contains(char::is_whitespace)
+            });
         if !valid {
             return Err(IdentityInputError::InvalidEmail);
         }
@@ -97,9 +95,9 @@ pub fn validate_device_label(value: &str) -> Result<String, IdentityInputError> 
 
 pub fn validate_pkce_challenge(value: &str) -> Result<String, IdentityInputError> {
     let valid = (43..=128).contains(&value.len())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' || byte == b'.');
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' || byte == b'.'
+        });
     if !valid {
         return Err(IdentityInputError::InvalidCodeChallenge);
     }
@@ -136,15 +134,30 @@ mod tests {
     fn display_device_and_pkce_inputs_are_bounded() {
         assert_eq!(validate_display_name("  Person  ").unwrap(), "Person");
         assert!(validate_display_name("\n").is_err());
-        assert_eq!(validate_device_label("Lumi Desktop").unwrap(), "Lumi Desktop");
+        assert_eq!(
+            validate_device_label("Lumi Desktop").unwrap(),
+            "Lumi Desktop"
+        );
         assert!(validate_pkce_challenge(&"a".repeat(43)).is_ok());
         assert!(validate_pkce_challenge("short").is_err());
     }
 
     #[test]
     fn session_state_requires_unexpired_and_unrevoked() {
-        assert!(is_active_session(None, "2026-09-25T00:00:00.000Z", "2026-09-24T23:59:59.000Z"));
-        assert!(!is_active_session(Some("2026-09-24T00:00:00.000Z"), "2026-09-25T00:00:00.000Z", "2026-09-24T23:59:59.000Z"));
-        assert!(!is_active_session(None, "2026-09-24T00:00:00.000Z", "2026-09-24T23:59:59.000Z"));
+        assert!(is_active_session(
+            None,
+            "2026-09-25T00:00:00.000Z",
+            "2026-09-24T23:59:59.000Z"
+        ));
+        assert!(!is_active_session(
+            Some("2026-09-24T00:00:00.000Z"),
+            "2026-09-25T00:00:00.000Z",
+            "2026-09-24T23:59:59.000Z"
+        ));
+        assert!(!is_active_session(
+            None,
+            "2026-09-24T00:00:00.000Z",
+            "2026-09-24T23:59:59.000Z"
+        ));
     }
 }

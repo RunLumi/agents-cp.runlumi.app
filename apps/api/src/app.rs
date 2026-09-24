@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    Router,
-    middleware,
+    Router, middleware,
     routing::{delete, get, patch, post},
 };
 use worker::{Env, Queue};
@@ -33,7 +32,10 @@ pub fn router(env: Env) -> Router {
     let state = Arc::new(AppState {
         database: env.d1("DB").ok().map(D1Adapter::new).map(Arc::new),
         queue: env.queue("OUTBOX_QUEUE").ok(),
-        environment: env.var("ENVIRONMENT").map(|value| value.to_string()).unwrap_or_else(|_| "production".to_owned()),
+        environment: env
+            .var("ENVIRONMENT")
+            .map(|value| value.to_string())
+            .unwrap_or_else(|_| "production".to_owned()),
     });
 
     let mut routes = Router::<Arc<AppState>>::new()
@@ -46,15 +48,39 @@ pub fn router(env: Env) -> Router {
         .route("/api/v1/auth/logout", post(auth::logout))
         .route("/api/v1/auth/refresh", post(auth::refresh))
         .route("/api/v1/auth/device-code", post(device_auth::start))
-        .route("/api/v1/auth/device-code/approve", post(device_auth::approve))
-        .route("/api/v1/auth/device-code/exchange", post(device_auth::exchange))
+        .route(
+            "/api/v1/auth/device-code/approve",
+            post(device_auth::approve),
+        )
+        .route(
+            "/api/v1/auth/device-code/exchange",
+            post(device_auth::exchange),
+        )
         .route("/api/v1/me", get(auth::me))
-        .route("/api/v1/orgs", post(organizations::create).get(organizations::list))
-        .route("/api/v1/orgs/{org_id}", get(organizations::get).patch(organizations::update))
-        .route("/api/v1/orgs/{org_id}/members", get(organizations::list_members))
+        .route("/api/v1/me/identities/link", post(auth::link_identity))
+        .route(
+            "/api/v1/orgs",
+            post(organizations::create).get(organizations::list),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}",
+            get(organizations::get).patch(organizations::update),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/members",
+            get(organizations::list_members),
+        )
         .route(
             "/api/v1/orgs/{org_id}/invitations",
-            post(organizations::invite),
+            get(organizations::list_invitations).post(organizations::invite),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/invitations/{invitation_id}",
+            delete(organizations::revoke_invitation),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/invitations/{invitation_id}/resend",
+            post(organizations::resend_invitation),
         )
         .route(
             "/api/v1/invitations/{invitation_id}/accept",
@@ -67,6 +93,15 @@ pub fn router(env: Env) -> Router {
         .route(
             "/api/v1/orgs/{org_id}/ownership-transfer",
             post(organizations::transfer_ownership),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/suspend",
+            post(organizations::suspend),
+        )
+        .route("/api/v1/orgs/{org_id}/resume", post(organizations::resume))
+        .route(
+            "/api/v1/orgs/{org_id}/deletion",
+            post(organizations::begin_deletion),
         )
         .route(
             "/api/v1/orgs/{org_id}/teams",
@@ -82,10 +117,19 @@ pub fn router(env: Env) -> Router {
         )
         .route("/api/v1/orgs/{org_id}/audit", get(organizations::audit))
         .route("/api/v1/account/sessions", get(account::sessions))
-        .route("/api/v1/account/sessions/revoke-all", post(account::revoke_all_sessions))
-        .route("/api/v1/account/sessions/{session_id}", delete(account::revoke_session))
+        .route(
+            "/api/v1/account/sessions/revoke-all",
+            post(account::revoke_all_sessions),
+        )
+        .route(
+            "/api/v1/account/sessions/{session_id}",
+            delete(account::revoke_session),
+        )
         .route("/api/v1/account/reauth", post(account::reauthenticate))
-        .route("/api/v1/account/security-events", get(account::security_events));
+        .route(
+            "/api/v1/account/security-events",
+            get(account::security_events),
+        );
 
     if is_development {
         routes = routes

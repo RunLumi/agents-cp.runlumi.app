@@ -18,7 +18,9 @@ pub fn validate_team_name(value: &str) -> Result<String, TeamInputError> {
 pub fn normalize_team_slug(value: &str) -> Result<String, TeamInputError> {
     let value = value.trim().to_ascii_lowercase();
     if !(1..=63).contains(&value.len())
-        || !value.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
     {
         return Err(TeamInputError::InvalidSlug);
     }
@@ -26,7 +28,10 @@ pub fn normalize_team_slug(value: &str) -> Result<String, TeamInputError> {
 }
 
 pub fn can_manage_teams(role: MembershipRole) -> bool {
-    matches!(role, MembershipRole::Owner | MembershipRole::Admin | MembershipRole::Member)
+    matches!(
+        role,
+        MembershipRole::Owner | MembershipRole::Admin | MembershipRole::Member
+    )
 }
 
 #[cfg(test)]

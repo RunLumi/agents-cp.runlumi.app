@@ -8,8 +8,8 @@ use crate::{
     core::{ApiError, ApiErrorCode, Principal, RequestContext},
     http::auth::require_session,
     modules::authorization::{
-        authorize, AuthorizationDecision, DenyReason, MembershipRole, MembershipSnapshot,
-        MembershipStatus, OrganizationContext, OrganizationState, Permission, ResourceContext,
+        AuthorizationDecision, DenyReason, MembershipRole, MembershipSnapshot, MembershipStatus,
+        OrganizationContext, OrganizationState, Permission, ResourceContext, authorize,
     },
     repositories::{MembershipRecord, OrganizationRecord, OrganizationRepository, SessionRecord},
     routes::{errors, support::database},
@@ -33,7 +33,9 @@ pub async fn authorize_org(
     resource_type: Option<&str>,
     resource_id: Option<&str>,
 ) -> Result<OrgAccess, ApiError> {
-    if let Some(header_org) = headers.get("x-org-id").and_then(|value| value.to_str().ok())
+    if let Some(header_org) = headers
+        .get("x-org-id")
+        .and_then(|value| value.to_str().ok())
         && header_org != org_id
     {
         return Err(errors::api_error(
@@ -58,10 +60,10 @@ pub async fn authorize_org(
         .ok_or_else(|| inaccessible(context))?;
     let state_value = OrganizationState::parse(&organization.state)
         .ok_or_else(|| service_unavailable(context))?;
-    let role = MembershipRole::parse(&membership.role)
-        .ok_or_else(|| service_unavailable(context))?;
-    let status = MembershipStatus::parse(&membership.status)
-        .ok_or_else(|| service_unavailable(context))?;
+    let role =
+        MembershipRole::parse(&membership.role).ok_or_else(|| service_unavailable(context))?;
+    let status =
+        MembershipStatus::parse(&membership.status).ok_or_else(|| service_unavailable(context))?;
     let organization_context = OrganizationContext {
         organization_id: crate::core::OrganizationId::new(org_id)
             .map_err(|_| inaccessible(context))?,
@@ -122,16 +124,26 @@ pub fn denial(context: &RequestContext, reason: DenyReason) -> ApiError {
         DenyReason::OrganizationSuspended => "This organization is suspended.",
         DenyReason::OrganizationPendingDeletion => "This organization is pending deletion.",
         DenyReason::OrganizationDeleted => "The requested organization was not found.",
-        DenyReason::ResourceScopeMismatch => "The requested resource is outside the organization scope.",
-        DenyReason::StaleMembership => "The organization membership changed. Refresh and try again.",
-        DenyReason::UnknownPermission | DenyReason::VersionConflict => "The request is not permitted.",
+        DenyReason::ResourceScopeMismatch => {
+            "The requested resource is outside the organization scope."
+        }
+        DenyReason::StaleMembership => {
+            "The organization membership changed. Refresh and try again."
+        }
+        DenyReason::UnknownPermission | DenyReason::VersionConflict => {
+            "The request is not permitted."
+        }
     };
     errors::api_error(context, code, message).with_detail("reason", json!(reason.as_str()))
 }
 
 fn inaccessible(context: &RequestContext) -> ApiError {
-    errors::api_error(context, ApiErrorCode::NotFound, "The requested resource was not found.")
-        .with_detail("reason", json!("resource_not_found"))
+    errors::api_error(
+        context,
+        ApiErrorCode::NotFound,
+        "The requested resource was not found.",
+    )
+    .with_detail("reason", json!("resource_not_found"))
 }
 
 fn service_unavailable(context: &RequestContext) -> ApiError {

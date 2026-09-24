@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use axum::http::Response;
 use serde_json::json;
 
 use crate::{
@@ -13,6 +12,56 @@ use crate::{
     repositories::{OutboxRepository, UserRecord},
     routes::errors,
 };
+
+pub fn idempotency_key(
+    headers: &axum::http::HeaderMap,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let value = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+        })
+        .ok_or_else(|| {
+            domain_error(
+                context,
+                ApiErrorCode::BadRequest,
+                "idempotency_key_required",
+                "Idempotency-Key is required for this mutation.",
+            )
+        })?;
+    Ok(value.to_owned())
+}
+
+pub async fn deterministic_resource_id(
+    prefix: &str,
+    key: &str,
+    scope: &str,
+    context: &RequestContext,
+) -> Result<String, ApiError> {
+    let digest = crate::adapters::sha256_hex(&format!("{scope}:{key}"))
+        .await
+        .map_err(|_| {
+            errors::api_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "The idempotency store is unavailable.",
+            )
+        })?;
+    let value = format!("{prefix}_{}", &digest[..32]);
+    crate::core::ResourceId::new(value)
+        .map(|id| id.as_str().to_owned())
+        .map_err(|_| {
+            errors::api_error(
+                context,
+                ApiErrorCode::InternalError,
+                "The idempotency resource ID is invalid.",
+            )
+        })
+}
 
 pub fn database<'a>(
     state: &'a Arc<AppState>,
@@ -37,7 +86,11 @@ pub fn outbox_statement(
 ) -> Result<worker::d1::D1PreparedStatement, ApiError> {
     let actor = if let Some(principal) = principal {
         let actor_id = ActorId::new(principal.user_id.as_str()).map_err(|_| {
-            errors::api_error(context, ApiErrorCode::InternalError, "The event actor is invalid.")
+            errors::api_error(
+                context,
+                ApiErrorCode::InternalError,
+                "The event actor is invalid.",
+            )
         })?;
         ActorContext {
             actor_type: crate::core::ActorType::User,
@@ -48,13 +101,23 @@ pub fn outbox_statement(
         ActorContext::anonymous()
     };
     let organization_id = organization_id
-        .map(|value| OrganizationId::new(value))
+        .map(OrganizationId::new)
         .transpose()
-        .map_err(|_| errors::api_error(context, ApiErrorCode::InternalError, "The event scope is invalid."))?;
+        .map_err(|_| {
+            errors::api_error(
+                context,
+                ApiErrorCode::InternalError,
+                "The event scope is invalid.",
+            )
+        })?;
     let event = EventEnvelope {
         event_id: new_event_id(),
         event_type: EventType::new(event_type).map_err(|_| {
-            errors::api_error(context, ApiErrorCode::InternalError, "The event type is invalid.")
+            errors::api_error(
+                context,
+                ApiErrorCode::InternalError,
+                "The event type is invalid.",
+            )
         })?,
         occurred_at: context.received_at.clone(),
         request_id: context.request_id.clone(),
@@ -65,7 +128,13 @@ pub fn outbox_statement(
     };
     OutboxRepository::new(database)
         .insert_statement(&event)
-        .map_err(|_| errors::api_error(context, ApiErrorCode::ServiceUnavailable, "The event store is unavailable."))
+        .map_err(|_| {
+            errors::api_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "The event store is unavailable.",
+            )
+        })
 }
 
 pub fn domain_error(
@@ -105,18 +174,6 @@ pub fn user_json(user: &UserRecord) -> serde_json::Value {
     })
 }
 
-pub fn principal_actor(principal: &Principal) -> (&str, &str, &str) {
-    (
-        principal.user_id.as_str(),
-        principal.user_id.as_str(),
-        principal.session_id.as_str(),
-    )
-}
-
-pub fn empty_json_body() -> serde_json::Value {
-    json!({})
-}
-
 pub fn is_development(state: &AppState) -> bool {
     state.environment == "development"
 }
@@ -124,9 +181,3 @@ pub fn is_development(state: &AppState) -> bool {
 pub fn secure_cookie(state: &AppState) -> bool {
     state.environment == "production"
 }
-
-pub fn status_response<T: serde::Serialize>(status: axum::http::StatusCode, body: T) -> Response<axum::body::Body> {
-    (status, axum::Json(body)).into_response()
-}
-
-use axum::response::IntoResponse;

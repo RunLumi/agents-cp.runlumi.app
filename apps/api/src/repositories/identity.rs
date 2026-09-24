@@ -17,6 +17,12 @@ INSERT INTO identities (
 ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)
 "#;
 
+const LINK_IDENTITY_SQL: &str = r#"
+INSERT INTO identities (
+    identity_id, user_id, provider, provider_subject, email, email_verified, created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)
+"#;
+
 const USER_BY_EMAIL_SQL: &str = r#"
 SELECT user_id, email, display_name, email_verified, version, created_at, updated_at
 FROM users
@@ -131,6 +137,19 @@ SET revoked_at = ?2, revoked_reason = ?3
 WHERE session_id = ?1 AND user_id = ?4 AND revoked_at IS NULL
 "#;
 
+const UPSERT_AUTH_RATE_LIMIT_SQL: &str = r#"
+INSERT INTO auth_rate_limits (bucket_key, attempts, window_started_at, expires_at)
+VALUES (?1, 1, ?2, ?3)
+ON CONFLICT (bucket_key) DO UPDATE SET
+    attempts = CASE WHEN auth_rate_limits.expires_at <= ?2 THEN 1 ELSE auth_rate_limits.attempts + 1 END,
+    window_started_at = CASE WHEN auth_rate_limits.expires_at <= ?2 THEN ?2 ELSE auth_rate_limits.window_started_at END,
+    expires_at = CASE WHEN auth_rate_limits.expires_at <= ?2 THEN ?3 ELSE auth_rate_limits.expires_at END
+"#;
+
+const GET_AUTH_RATE_LIMIT_SQL: &str = r#"
+SELECT attempts FROM auth_rate_limits WHERE bucket_key = ?1 LIMIT 1
+"#;
+
 const INSERT_REAUTH_SQL: &str = r#"
 INSERT INTO reauthentication_grants (
     grant_id, user_id, session_id, purpose, token_hash, expires_at, created_at
@@ -192,6 +211,11 @@ pub struct SessionSummary {
     pub expires_at: String,
     pub last_seen_at: String,
     pub created_at: String,
+}
+
+#[derive(Deserialize)]
+struct RateLimitRow {
+    attempts: i64,
 }
 
 #[derive(Deserialize)]
@@ -320,6 +344,29 @@ impl<'a> IdentityRepository<'a> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn link_identity_statement(
+        &self,
+        identity_id: &str,
+        user_id: &str,
+        provider: &str,
+        provider_subject: &str,
+        email: &str,
+        now: &Timestamp,
+    ) -> worker::Result<D1PreparedStatement> {
+        self.database.prepare(
+            LINK_IDENTITY_SQL,
+            &[
+                BindValue::Text(identity_id),
+                BindValue::Text(user_id),
+                BindValue::Text(provider),
+                BindValue::Text(provider_subject),
+                BindValue::Text(email),
+                BindValue::Text(now.as_str()),
+            ],
+        )
+    }
+
     pub async fn create_user(
         &self,
         user_id: &str,
@@ -337,6 +384,35 @@ impl<'a> IdentityRepository<'a> {
         self.find_user_by_id(user_id)
             .await?
             .ok_or_else(|| worker::Error::RustError("created user could not be read".into()))
+    }
+
+    pub async fn allow_auth_attempt(
+        &self,
+        bucket_key: &str,
+        now: &Timestamp,
+        expires_at: &Timestamp,
+        limit: i64,
+    ) -> worker::Result<bool> {
+        if bucket_key.is_empty() || bucket_key.len() > 128 || !(1..=100).contains(&limit) {
+            return Err(worker::Error::RustError("invalid auth rate limit".into()));
+        }
+        self.database
+            .prepare(
+                UPSERT_AUTH_RATE_LIMIT_SQL,
+                &[
+                    BindValue::Text(bucket_key),
+                    BindValue::Text(now.as_str()),
+                    BindValue::Text(expires_at.as_str()),
+                ],
+            )?
+            .run()
+            .await?;
+        let row = self
+            .database
+            .prepare(GET_AUTH_RATE_LIMIT_SQL, &[BindValue::Text(bucket_key)])?
+            .first::<RateLimitRow>(None)
+            .await?;
+        Ok(row.is_some_and(|row| row.attempts <= limit))
     }
 
     pub async fn find_user_by_email(&self, email: &str) -> worker::Result<Option<UserRecord>> {
@@ -357,7 +433,10 @@ impl<'a> IdentityRepository<'a> {
         row.map(TryInto::try_into).transpose()
     }
 
-    pub async fn find_identity_by_user(&self, user_id: &str) -> worker::Result<Option<IdentityRecord>> {
+    pub async fn find_identity_by_user(
+        &self,
+        user_id: &str,
+    ) -> worker::Result<Option<IdentityRecord>> {
         let row = self
             .database
             .prepare(IDENTITY_BY_USER_SQL, &[BindValue::Text(user_id)])?
@@ -366,6 +445,7 @@ impl<'a> IdentityRepository<'a> {
         row.map(TryInto::try_into).transpose()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_challenge_statement(
         &self,
         challenge_id: &str,
@@ -391,7 +471,10 @@ impl<'a> IdentityRepository<'a> {
         )
     }
 
-    pub async fn find_challenge(&self, challenge_id: &str) -> worker::Result<Option<ChallengeRecord>> {
+    pub async fn find_challenge(
+        &self,
+        challenge_id: &str,
+    ) -> worker::Result<Option<ChallengeRecord>> {
         let row = self
             .database
             .prepare(CHALLENGE_BY_ID_SQL, &[BindValue::Text(challenge_id)])?
@@ -421,12 +504,12 @@ impl<'a> IdentityRepository<'a> {
         Ok(D1Adapter::changes(&result)? == 1)
     }
 
-    pub async fn record_failed_challenge(
-        &self,
-        challenge_id: &str,
-    ) -> worker::Result<()> {
+    pub async fn record_failed_challenge(&self, challenge_id: &str) -> worker::Result<()> {
         self.database
-            .prepare(RECORD_FAILED_CHALLENGE_SQL, &[BindValue::Text(challenge_id)])?
+            .prepare(
+                RECORD_FAILED_CHALLENGE_SQL,
+                &[BindValue::Text(challenge_id)],
+            )?
             .run()
             .await?;
         Ok(())
@@ -450,6 +533,7 @@ impl<'a> IdentityRepository<'a> {
         ])
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_session_statement(
         &self,
         session_id: &str,
@@ -483,7 +567,10 @@ impl<'a> IdentityRepository<'a> {
     ) -> worker::Result<Option<SessionRecord>> {
         let row = self
             .database
-            .prepare(SESSION_BY_TOKEN_SQL, &[BindValue::Text(token_hash), BindValue::Text(now.as_str())])?
+            .prepare(
+                SESSION_BY_TOKEN_SQL,
+                &[BindValue::Text(token_hash), BindValue::Text(now.as_str())],
+            )?
             .first::<SessionRow>(None)
             .await?;
         row.map(TryInto::try_into).transpose()
@@ -607,6 +694,7 @@ impl<'a> IdentityRepository<'a> {
         Ok(D1Adapter::changes(&result)? == 1)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_reauth_statement(
         &self,
         grant_id: &str,

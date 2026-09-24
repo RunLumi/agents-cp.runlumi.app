@@ -111,9 +111,13 @@ impl<'a> SecurityEventRepository<'a> {
     ) -> worker::Result<D1PreparedStatement> {
         let metadata = serde_json::to_string(event.metadata)
             .map_err(|_| worker::Error::RustError("security event metadata is invalid".into()))?;
-        let organization_id = event.organization_id.map_or(BindValue::Null, BindValue::Text);
+        let organization_id = event
+            .organization_id
+            .map_or(BindValue::Null, BindValue::Text);
         let actor_id = event.actor_id.map_or(BindValue::Null, BindValue::Text);
-        let effective_user_id = event.effective_user_id.map_or(BindValue::Null, BindValue::Text);
+        let effective_user_id = event
+            .effective_user_id
+            .map_or(BindValue::Null, BindValue::Text);
         let session_id = event.session_id.map_or(BindValue::Null, BindValue::Text);
         let device_id = event.device_id.map_or(BindValue::Null, BindValue::Text);
         let resource_id = event.resource_id.map_or(BindValue::Null, BindValue::Text);
@@ -148,7 +152,9 @@ impl<'a> SecurityEventRepository<'a> {
         offset: u32,
     ) -> worker::Result<Vec<SecurityEventRecord>> {
         if !(1..=100).contains(&limit) || offset > 10_000 {
-            return Err(worker::Error::RustError("invalid security event page".into()));
+            return Err(worker::Error::RustError(
+                "invalid security event page".into(),
+            ));
         }
         let result = self
             .database
@@ -199,7 +205,9 @@ impl<'a> SecurityEventRepository<'a> {
         offset: u32,
     ) -> worker::Result<Vec<SecurityEventRecord>> {
         if !(1..=100).contains(&limit) || offset > 10_000 {
-            return Err(worker::Error::RustError("invalid security event page".into()));
+            return Err(worker::Error::RustError(
+                "invalid security event page".into(),
+            ));
         }
         let statement = self.database.prepare(
             LIST_SECURITY_EVENTS_SQL,
@@ -215,8 +223,9 @@ impl<'a> SecurityEventRepository<'a> {
             .results::<SecurityEventRow>()?
             .into_iter()
             .map(|row| {
-                let metadata = serde_json::from_str(&row.metadata_json)
-                    .map_err(|_| worker::Error::RustError("invalid security event metadata".into()))?;
+                let metadata = serde_json::from_str(&row.metadata_json).map_err(|_| {
+                    worker::Error::RustError("invalid security event metadata".into())
+                })?;
                 Ok(SecurityEventRecord {
                     event_id: row.event_id,
                     org_id: nonempty(row.org_id),
