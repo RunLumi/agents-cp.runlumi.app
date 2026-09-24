@@ -17,3 +17,7 @@ target/
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+zai_screens/*
+/docs/screens/zai_screens/
+tmp/*
+.pnpm-store/
