@@ -15,5 +15,6 @@ ADRs preserve decisions beyond any one human or agent context window.
 - [0003 Vite, React, shadcn, and Base UI](0003-vite-react-shadcn-base-ui.md)
 - [0004 Performance budgets](0004-performance-budgets.md)
 - [0005 API contracts and testing](0005-api-contracts-and-testing.md)
+- [Research references](REFERENCES.md)
 
 When a durable decision changes, add a new ADR or explicitly supersede the old one. Do not silently rewrite history.
