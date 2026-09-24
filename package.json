@@ -1,0 +1,25 @@
+{
+  "name": "lumi-agents-control-plane",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream --filter @runlumi/agents-cp-api --filter @runlumi/agents-cp-web dev",
+    "build": "pnpm -r --filter @runlumi/agents-cp-api --filter @runlumi/agents-cp-web build",
+    "format": "oxfmt . && cargo fmt --all",
+    "format:check": "oxfmt --check . && cargo fmt --all -- --check",
+    "lint": "oxlint --type-aware apps/web/src apps/web/vite.config.ts",
+    "typecheck": "pnpm --filter @runlumi/agents-cp-web typecheck",
+    "test": "pnpm --filter @runlumi/agents-cp-web test && cargo test --workspace",
+    "rust:check": "cargo clippy --workspace --all-targets -- -D warnings && cargo check --workspace --target wasm32-unknown-unknown",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm rust:check",
+    "ui:add": "pnpm --filter @runlumi/agents-cp-web ui:add"
+  },
+  "devDependencies": {
+    "oxfmt": "0.70.0",
+    "oxlint": "1.85.0"
+  }
+}
