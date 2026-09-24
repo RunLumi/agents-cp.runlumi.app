@@ -5,6 +5,6 @@
   "compatibility_date": "2026-09-24",
   "workers_dev": true,
   "build": {
-    "command": "cargo install --locked worker-build --version \"^0.8\" && worker-build --release"
+    "command": "worker-build --release"
   }
 }
