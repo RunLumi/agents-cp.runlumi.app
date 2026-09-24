@@ -9,7 +9,7 @@ Last initialized: 2026-09-24
 - Active execution model: **P00**
 - Current implementation phase: **P01 in progress**
 - Next implementable phase: **P01**
-- Current Contract Gate: **P01-CG `p01-cg-v1`, frozen at `d3e5d75`**
+- Current Contract Gate: **P01-CG `p01-cg-v1`, frozen at `7835fd9`**
 - Shared-file owner: **P01 coordinator**
 - Integration owner: **P01 coordinator**
 
@@ -18,7 +18,7 @@ Last initialized: 2026-09-24
 | Phase | State | Contract Gate | Integration Gate | Notes |
 |---|---|---|---|---|
 | P00 | active | n/a | n/a | execution mechanics operationalized |
-| P01 | in_progress | frozen: `d3e5d75` | not started | MOD-01, BE-01, and FE-01 executing |
+| P01 | in_progress | frozen: `7835fd9` | not started | MOD-01, BE-01, and FE-01 executing |
 | P02 | blocked | blocked | blocked | waits for P01 |
 | P03 | blocked | blocked | blocked | waits for P02 |
 | P04 | blocked | blocked | blocked | waits for P02 |

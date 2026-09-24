@@ -1,0 +1,42 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned pnpm and Node.js 24
+        uses: pnpm/setup@v3
+        with:
+          runtime: node@24
+          require-lockfile: true
+          cache: true
+
+      - name: Install Rust and Worker WASM target
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install workers-rs build tool
+        run: cargo install --locked worker-build --version "^0.8"
+
+      - name: Run formatting, lint, type, and unit checks
+        run: pnpm check
+
+      - name: Build web app and Worker dry run
+        run: pnpm build
