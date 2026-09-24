@@ -1,37 +1,41 @@
 @import "tailwindcss";
 
 :root {
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Geist,
+    "Noto Sans",
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   color-scheme: light;
-  --surface: #f6f7f9;
+  --surface: #f4f0e8;
   --panel: #ffffff;
-  --panel-hover: #f4f5f7;
-  --panel-strong: #eceef1;
-  --foreground: #15171a;
-  --muted: #777d87;
-  --muted-strong: #555b65;
-  --border: #e1e4e8;
-  --ring: #6b7280;
-  --shadow: 0 1px 2px rgb(15 23 42 / 0.03), 0 8px 24px rgb(15 23 42 / 0.025);
+  --panel-hover: #f9f7f2;
+  --panel-strong: #e7eaf0;
+  --foreground: #172033;
+  --muted: #5e6677;
+  --muted-strong: #334155;
+  --border: #d9dee8;
+  --ring: #006093;
+  --lumi-blue: #006093;
+  --lumi-blue-soft: #e4f3fc;
+  --lumi-blue-hover: #004f80;
+  --civic-navy: #102a43;
+  --success: #1f7a4d;
+  --warning: #f4a62a;
+  --danger: #c2410c;
+  --shadow:
+    inset 0 1px 0 color-mix(in oklch, white 60%, transparent),
+    0 1px 2px -1px color-mix(in oklch, #102a43 8%, transparent),
+    0 8px 20px -10px color-mix(in oklch, #102a43 10%, transparent);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --surface: #101113;
-    --panel: #15171a;
-    --panel-hover: #1b1d21;
-    --panel-strong: #202329;
-    --foreground: #f5f6f7;
-    --muted: #8e949e;
-    --muted-strong: #b5bac2;
-    --border: #292c31;
-    --ring: #a3a8b0;
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.16), 0 12px 36px rgb(0 0 0 / 0.12);
-  }
+* {
+  box-sizing: border-box;
 }
-
-* { box-sizing: border-box; }
 
 html {
   background: var(--surface);
@@ -45,12 +49,23 @@ body {
   position: relative;
 }
 
-button, input, textarea, select { font: inherit; }
-button { -webkit-tap-highlight-color: transparent; }
-.app-root { isolation: isolate; }
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+.app-root {
+  isolation: isolate;
+}
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
