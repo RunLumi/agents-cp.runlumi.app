@@ -19,7 +19,7 @@ Last initialized: 2026-09-24
 |---|---|---|---|---|
 | P00 | active | n/a | n/a | execution mechanics operationalized |
 | P01 | complete | merged: `7835fd9` (PR #4) | PASS: `docs/implementation/gates/P01-IG.md` | PR #5 merged as `ced9635`; hosted check/build and local vertical slice passed |
-| P02 | complete | frozen: `ba35fb6`; CR-001: `3719b8d` | PASS: `docs/implementation/gates/P02-IG.md` | Real local identity/org/member/authz/audit slice and hostile smoke pass; browser capture follow-up documented |
+| P02 | complete | frozen: `ba35fb6`; CR-001: `0290e68` | PASS: `docs/implementation/gates/P02-IG.md` | Real local identity/org/member/authz/audit slice and hostile smoke pass; browser capture follow-up documented |
 | P03 | ready | ready to open | not started | P02 principal/org/authz/device handoff stable |
 | P04 | ready | ready to open | not started | P02 principal/org/authz contracts stable |
 | P05 | blocked | blocked | blocked | waits for P03 + P04 |
