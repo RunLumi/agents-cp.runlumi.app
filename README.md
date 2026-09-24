@@ -33,6 +33,7 @@ Prerequisites: Node 24 LTS, pnpm 12, stable Rust, and `wasm32-unknown-unknown`.
 corepack enable
 pnpm install
 rustup target add wasm32-unknown-unknown
+cargo install --locked worker-build --version "^0.8"
 pnpm dev
 ```
 
