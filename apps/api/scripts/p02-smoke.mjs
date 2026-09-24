@@ -84,11 +84,64 @@ let result = await request(alice.jar, "POST", "/api/v1/orgs", createBody, {
 assert.equal(result.status, 201);
 const orgId = result.payload.organization.org_id;
 const ownerMembershipId = result.payload.membership.membership_id;
+result = await request(
+  alice.jar,
+  "PATCH",
+  `/api/v1/orgs/${orgId}/members/${ownerMembershipId}`,
+  { role: "viewer", version: 1 },
+  { "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf") },
+);
+assert.equal(result.status, 409);
+assert.equal(result.payload.error.details.reason, "last_owner_required");
 result = await request(alice.jar, "POST", "/api/v1/orgs", createBody, {
   "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf"),
   "Idempotency-Key": createIdempotencyKey,
 });
 assert.equal(result.status, 200);
+
+const lifecycleGrant = await request(
+  alice.jar,
+  "POST",
+  "/api/v1/account/reauth",
+  { purpose: "org_lifecycle" },
+  { "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf") },
+);
+assert.equal(lifecycleGrant.status, 201);
+result = await request(
+  alice.jar,
+  "POST",
+  `/api/v1/orgs/${orgId}/suspend`,
+  {
+    version: 1,
+    reauth_grant_id: lifecycleGrant.payload.grant_id,
+    reauth_token: lifecycleGrant.payload.token,
+  },
+  { "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf") },
+);
+assert.equal(result.status, 200);
+assert.equal(result.payload.state, "suspended");
+result = await request(alice.jar, "GET", `/api/v1/orgs/${orgId}/members`);
+assert.equal(result.status, 403);
+const resumeGrant = await request(
+  alice.jar,
+  "POST",
+  "/api/v1/account/reauth",
+  { purpose: "org_lifecycle" },
+  { "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf") },
+);
+result = await request(
+  alice.jar,
+  "POST",
+  `/api/v1/orgs/${orgId}/resume`,
+  {
+    version: 2,
+    reauth_grant_id: resumeGrant.payload.grant_id,
+    reauth_token: resumeGrant.payload.token,
+  },
+  { "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf") },
+);
+assert.equal(result.status, 200);
+assert.equal(result.payload.state, "active");
 
 result = await request(
   alice.jar,
@@ -181,6 +234,76 @@ const auditEvents = result.payload.items;
 assert.ok(auditEvents.some((event) => event.action === "membership.accepted.v1"));
 assert.ok(auditEvents.some((event) => event.action === "membership.removed.v1"));
 assert.ok(auditEvents.every((event) => !JSON.stringify(event).includes(invitationToken)));
+
+// Race two owner demotions in a separate tenant. Both requests start from
+// two active owners; the conditional D1 update must leave one active owner.
+result = await request(
+  alice.jar,
+  "POST",
+  "/api/v1/orgs",
+  { display_name: "P02 Owner Race", slug: `p02-race-${randomUUID().slice(0, 6)}` },
+  csrf(alice.jar),
+);
+assert.equal(result.status, 201);
+const raceOrgId = result.payload.organization.org_id;
+const raceAliceMembership = result.payload.membership.membership_id;
+result = await request(
+  alice.jar,
+  "POST",
+  `/api/v1/orgs/${raceOrgId}/invitations`,
+  { email: bob.user.email, role: "member" },
+  csrf(alice.jar),
+);
+assert.equal(result.status, 201);
+const raceInvitation = result.payload.invitation.id;
+const raceToken = result.payload.development_token;
+result = await request(
+  bob.jar,
+  "POST",
+  `/api/v1/invitations/${raceInvitation}/accept`,
+  { token: raceToken },
+  { "X-CSRF-Token": bob.jar.cookies.get("lumi_csrf") },
+);
+assert.equal(result.status, 200);
+const raceBobMembership = result.payload.membership.membership_id;
+const raceGrant = await request(
+  alice.jar,
+  "POST",
+  "/api/v1/account/reauth",
+  { purpose: "ownership_transfer" },
+  { "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf") },
+);
+assert.equal(raceGrant.status, 201);
+result = await request(
+  alice.jar,
+  "POST",
+  `/api/v1/orgs/${raceOrgId}/ownership-transfer`,
+  {
+    target_membership_id: raceBobMembership,
+    reauth_grant_id: raceGrant.payload.grant_id,
+    reauth_token: raceGrant.payload.token,
+  },
+  { "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf") },
+);
+assert.equal(result.status, 200);
+const ownerRace = await Promise.all([
+  request(
+    alice.jar,
+    "PATCH",
+    `/api/v1/orgs/${raceOrgId}/members/${raceAliceMembership}`,
+    { role: "admin", version: 2 },
+    { "X-CSRF-Token": alice.jar.cookies.get("lumi_csrf") },
+  ),
+  request(
+    bob.jar,
+    "PATCH",
+    `/api/v1/orgs/${raceOrgId}/members/${raceBobMembership}`,
+    { role: "admin", version: 2 },
+    { "X-CSRF-Token": bob.jar.cookies.get("lumi_csrf") },
+  ),
+]);
+assert.deepEqual(ownerRace.map((item) => item.status).sort(), [200, 409]);
+
 result = await request(
   alice.jar,
   "POST",

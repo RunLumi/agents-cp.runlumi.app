@@ -220,7 +220,7 @@ CREATE TABLE security_events (
     event_id TEXT PRIMARY KEY CHECK (
         length(event_id) = 36 AND substr(event_id, 1, 4) = 'sec_'
     ),
-    org_id TEXT REFERENCES organizations(org_id) ON DELETE SET NULL,
+    org_id TEXT REFERENCES organizations(org_id) ON DELETE RESTRICT,
     actor_type TEXT NOT NULL CHECK (actor_type IN ('user', 'service_account', 'support', 'system', 'anonymous')),
     actor_id TEXT,
     effective_user_id TEXT,

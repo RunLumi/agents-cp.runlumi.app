@@ -1,6 +1,6 @@
 # Plan 02 — Identity, organizations, membership, authorization
 
-Status: Planned
+Status: Complete
 Specs: F01, F02, F03, F04, F05, F16, F23
 Depends on: P01
 

@@ -1,0 +1,6 @@
+{
+  "device_authorization_id": "dev_0123456789abcdef0123456789abcdef",
+  "user_code": "ABCD1234",
+  "verification_uri": "/desktop",
+  "expires_at": "2026-09-24T12:10:00.000Z"
+}

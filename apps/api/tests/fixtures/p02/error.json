@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "permission_denied",
+    "message": "You do not have permission to perform this action.",
+    "request_id": "req_0123456789abcdef0123456789abcdef",
+    "details": { "reason": "membership_required" }
+  }
+}
