@@ -1,4 +1,10 @@
+pub mod account;
+pub mod auth;
+pub mod authorization;
+pub mod device_auth;
 pub mod errors;
 pub mod foundation_checks;
 pub mod health;
 pub mod meta;
+pub mod organizations;
+pub mod support;

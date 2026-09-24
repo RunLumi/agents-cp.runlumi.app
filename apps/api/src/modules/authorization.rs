@@ -163,6 +163,7 @@ pub enum DenyReason {
     ResourceScopeMismatch,
     StaleMembership,
     UnknownPermission,
+    VersionConflict,
 }
 
 impl DenyReason {
@@ -178,6 +179,7 @@ impl DenyReason {
             Self::ResourceScopeMismatch => "resource_scope_mismatch",
             Self::StaleMembership => "stale_membership",
             Self::UnknownPermission => "permission_denied",
+            Self::VersionConflict => "version_conflict",
         }
     }
 }
@@ -328,7 +330,6 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
             Permission::OrgRead
                 | Permission::MembersRead
                 | Permission::TeamsRead
-                | Permission::TeamsManage
         ),
         MembershipRole::Viewer => matches!(
             permission,

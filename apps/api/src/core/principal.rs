@@ -1,12 +1,10 @@
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
-
 use super::{SessionId, UserId};
 
 /// Server-resolved user principal. A value of this type is created only after
 /// a revocable session has been looked up in the canonical store.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Principal {
     pub user_id: UserId,
     pub session_id: SessionId,

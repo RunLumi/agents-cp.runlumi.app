@@ -4,6 +4,7 @@
 //! their own layers, while this boundary establishes request diagnostics and
 //! keeps transport failures inside the frozen API error contract.
 
+pub mod auth;
 mod middleware;
 mod platform;
 
