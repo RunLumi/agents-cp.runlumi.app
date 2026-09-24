@@ -86,7 +86,7 @@ No invitation token, session token, CSRF token, or password appears in the smoke
 
 - No new runtime dependency was added for P02; the Worker size increase is from the identity/org/authorization implementation and must be tracked against the P01 baseline.
 - Web assets remain below the 170 KiB JS / 35 KiB CSS budgets.
-- Migrations are additive and forward-only. `0002` establishes P02 relational constraints; `0003` adds bounded auth rate-limit storage. No production data or remote resource was modified.
+- Migrations are additive and forward-only. `0002` establishes P02 relational constraints; `0003` adds bounded auth rate-limit storage; `0004`–`0006` repair/extend challenge, multiple-identity, and consumed-device states. No production data or remote resource was modified.
 
 ## Exit decision
 
