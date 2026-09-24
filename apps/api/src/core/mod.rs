@@ -10,6 +10,7 @@ mod event;
 mod idempotency;
 mod identifiers;
 mod pagination;
+mod principal;
 mod timestamp;
 
 pub use context::{ActorContext, ActorType, RequestContext};
@@ -20,7 +21,10 @@ pub use idempotency::{
     RequestFingerprint, StoredSuccess,
 };
 pub use identifiers::{
-    ActorId, CorrelationId, DeviceId, EventId, OrganizationId, RequestId, ResourceId, SessionId,
+    ActorId, CorrelationId, DeviceAuthorizationId, DeviceId, EventId, IdentityId, InvitationId,
+    MembershipId, OrganizationId, ReauthenticationGrantId, RequestId, ResourceId, SecurityEventId,
+    SessionId, TeamId, TeamMemberId, UserId,
 };
 pub use pagination::{Cursor, Page};
+pub use principal::Principal;
 pub use timestamp::Timestamp;
