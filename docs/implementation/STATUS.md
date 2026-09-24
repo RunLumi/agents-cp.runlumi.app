@@ -7,19 +7,19 @@ Last initialized: 2026-09-24
 ## Current phase
 
 - Active execution model: **P00**
-- Current implementation phase: **P01 in progress**
-- Next implementable phase: **P01**
-- Current Contract Gate: **P01-CG `p01-cg-v1`, frozen at `7835fd9`**
-- Shared-file owner: **P01 coordinator**
-- Integration owner: **P01 coordinator**
+- Current implementation phase: **P01 complete**
+- Next implementable phase: **P02**
+- Current Contract Gate: **P01-CG `p01-cg-v1`, merged at `7835fd9` (PR #4)**
+- Shared-file owner: **P02 coordinator when assigned**
+- Integration owner: **P02 coordinator when assigned**
 
 ## Phase status
 
 | Phase | State | Contract Gate | Integration Gate | Notes |
 |---|---|---|---|---|
 | P00 | active | n/a | n/a | execution mechanics operationalized |
-| P01 | in_progress | frozen: `7835fd9` | not started | MOD-01, BE-01, and FE-01 executing |
-| P02 | blocked | blocked | blocked | waits for P01 |
+| P01 | complete | merged: `7835fd9` (PR #4) | PASS: `docs/implementation/gates/P01-IG.md` | PR #5 merged as `ced9635`; hosted check/build and local vertical slice passed |
+| P02 | ready | ready to open | not started | P01 dependency satisfied; P02 Contract Gate must merge before dependent packets diverge |
 | P03 | blocked | blocked | blocked | waits for P02 |
 | P04 | blocked | blocked | blocked | waits for P02 |
 | P05 | blocked | blocked | blocked | waits for P03 + P04 |
@@ -56,12 +56,12 @@ The coordinator alone:
 
 | Packet | State | Notes |
 |---|---|---|
-| P01-MOD-01 | in_progress | Core primitives |
-| P01-BE-01 | in_progress | D1 substrate |
-| P01-BE-02 | ready | Starts after BE-01 repository interface |
-| P01-BE-03 | ready | Starts after core types |
-| P01-FE-01 | in_progress | Uses frozen fixtures |
-| P01-QA-01 | ready | Integration work follows packet interfaces |
+| P01-MOD-01 | merged | Core primitives; PR #5 |
+| P01-BE-01 | merged | D1 substrate; PR #5 |
+| P01-BE-02 | merged | Outbox and Queue substrate; PR #5 |
+| P01-BE-03 | merged | HTTP middleware; PR #5 |
+| P01-FE-01 | merged | Typed web shell; PR #5 |
+| P01-QA-01 | merged | CI, smoke harness, and integration evidence; PR #5 |
 
 ## Rule
 
