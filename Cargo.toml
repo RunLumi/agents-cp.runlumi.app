@@ -7,4 +7,6 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 panic = "abort"
-strip = true
+# wasm-bindgen 0.2.125+ requires the externref table for catch wrappers;
+# stripping symbols removes it. Strip debug data while preserving that table.
+strip = "debuginfo"

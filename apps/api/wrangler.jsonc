@@ -4,7 +4,136 @@
   "main": "build/index.js",
   "compatibility_date": "2026-09-24",
   "workers_dev": true,
+  "vars": {
+    "ENVIRONMENT": "production",
+    "OUTBOX_DLQ_NAME": "lumi-agents-outbox-dlq",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lumi-agents-control-plane",
+      "migrations_dir": "./migrations",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOX_QUEUE",
+        "queue": "lumi-agents-outbox",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "lumi-agents-outbox",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 6,
+        "dead_letter_queue": "lumi-agents-outbox-dlq",
+        "retry_delay": 30,
+      },
+      {
+        "queue": "lumi-agents-outbox-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 10,
+        "retry_delay": 60,
+      },
+    ],
+  },
+  "triggers": {
+    "crons": ["*/1 * * * *"],
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1,
+  },
   "build": {
-    "command": "worker-build --release"
-  }
+    "command": "worker-build --release",
+  },
+  "env": {
+    "development": {
+      "name": "lumi-agents-control-plane-api-development",
+      "vars": {
+        "ENVIRONMENT": "development",
+        "OUTBOX_DLQ_NAME": "lumi-agents-outbox-development-dlq",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "lumi-agents-control-plane-development",
+          "migrations_dir": "./migrations",
+        },
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "OUTBOX_QUEUE",
+            "queue": "lumi-agents-outbox-development",
+          },
+        ],
+        "consumers": [
+          {
+            "queue": "lumi-agents-outbox-development",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 6,
+            "dead_letter_queue": "lumi-agents-outbox-development-dlq",
+            "retry_delay": 30,
+          },
+          {
+            "queue": "lumi-agents-outbox-development-dlq",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 10,
+            "retry_delay": 60,
+          },
+        ],
+      },
+      "triggers": {
+        "crons": ["*/1 * * * *"],
+      },
+    },
+    "production": {
+      "name": "lumi-agents-control-plane-api-production",
+      "vars": {
+        "ENVIRONMENT": "production",
+        "OUTBOX_DLQ_NAME": "lumi-agents-outbox-dlq",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "lumi-agents-control-plane",
+          "migrations_dir": "./migrations",
+        },
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "OUTBOX_QUEUE",
+            "queue": "lumi-agents-outbox",
+          },
+        ],
+        "consumers": [
+          {
+            "queue": "lumi-agents-outbox",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 6,
+            "dead_letter_queue": "lumi-agents-outbox-dlq",
+            "retry_delay": 30,
+          },
+          {
+            "queue": "lumi-agents-outbox-dlq",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 10,
+            "retry_delay": 60,
+          },
+        ],
+      },
+      "triggers": {
+        "crons": ["*/1 * * * *"],
+      },
+    },
+  },
 }
