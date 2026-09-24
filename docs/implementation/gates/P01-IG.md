@@ -85,4 +85,4 @@ Browser UI
 
 ## Exit decision
 
-**PASS** — the local integration slice is real, repeatable, and uses local D1/Queues. Remote Cloudflare deployment, hosted CI execution, production backup/restore, and the full F21 launch readiness contract remain outside this P01 evidence and are not claimed.
+**LOCAL INTEGRATION PASS; PHASE EXIT PENDING HOSTED CI** — the local integration slice is real, repeatable, and uses local D1/Queues. The exact `pnpm check` and `pnpm build` scripts await GitHub Actions on the implementation PR. Remote Cloudflare deployment, production backup/restore, and the full F21 launch readiness contract remain outside this P01 evidence and are not claimed.
