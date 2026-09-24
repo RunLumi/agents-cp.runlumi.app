@@ -130,6 +130,13 @@ Do not create `packages/ui`, `packages/utils`, or generic "shared" packages beca
 
 ## Frontend rules
 
+### Design system and brand assets
+
+- Before creating or changing user-facing UI, read the root `DESIGN.md`. It is the visual source of truth for Lumi's shared identity, color, typography, surfaces, imagery, and motion. Carry its shared design language across product UI; apply landing-page positioning and section-specific guidance only to the landing page.
+- Use the existing design tokens and visual rules. Do not introduce a competing palette, theme, typeface, logo treatment, or decorative style. If a needed visual rule is not covered, update `DESIGN.md` with the implementation rather than inventing a lasting convention in code.
+- Before changing a logo, favicon, app icon, splash image, or other brand artwork, inspect `brand/` and `brand/README.md`. Reuse the supplied assets: `lumi-logo.svg` for the symbol and `lumi-fulltext.svg` for the wordmark, choosing the black or white variant only when the background requires it.
+- Preserve brand artwork's colors, proportions, and transparency. Prefer the supplied SVG; create separate, clearly named derivatives from it only when a platform requires another format or size. Do not redraw, stretch, recolor, or replace the mark with text or an ad-hoc glyph.
+
 ### Performance
 
 - No application barrel files.
