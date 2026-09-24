@@ -1,6 +1,6 @@
 # Plan 01 — Foundation, contracts, persistence, test harness
 
-Status: Planned
+Status: Active
 Specs: F16, F21, F23 foundations
 Depends on: P00
 
