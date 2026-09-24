@@ -133,6 +133,9 @@ Do not create `packages/ui`, `packages/utils`, or generic "shared" packages beca
 ### Design system and brand assets
 
 - Before creating or changing user-facing UI, read the root `DESIGN.md`. It is the visual source of truth for Lumi's shared identity, color, typography, surfaces, imagery, and motion. Carry its shared design language across product UI; apply landing-page positioning and section-specific guidance only to the landing page.
+- Before frontend implementation, inspect `docs/screens/` and open the relevant screen images visually; reading filenames alone is not sufficient. Use them as references for page structure, information hierarchy, density, navigation, and component arrangement.
+- Follow `DESIGN.md` when translating screen references into UI. References, including third-party screens, do not override Lumi's design tokens, brand assets, accessibility rules, or the functional contracts in `docs/specs/`. Preserve the relevant layout intent while adapting styling and behavior to these requirements.
+- Record the screen reference paths used in the work packet and PR handoff. If no relevant reference exists, state that explicitly and build from the existing UI patterns and `DESIGN.md`.
 - Use the existing design tokens and visual rules. Do not introduce a competing palette, theme, typeface, logo treatment, or decorative style. If a needed visual rule is not covered, update `DESIGN.md` with the implementation rather than inventing a lasting convention in code.
 - Before changing a logo, favicon, app icon, splash image, or other brand artwork, inspect `brand/` and `brand/README.md`. Reuse the supplied assets: `lumi-logo.svg` for the symbol and `lumi-fulltext.svg` for the wordmark, choosing the black or white variant only when the background requires it.
 - Preserve brand artwork's colors, proportions, and transparency. Prefer the supplied SVG; create separate, clearly named derivatives from it only when a platform requires another format or size. Do not redraw, stretch, recolor, or replace the mark with text or an ad-hoc glyph.
@@ -163,6 +166,7 @@ Do not create `packages/ui`, `packages/utils`, or generic "shared" packages beca
 - Optimistic updates are allowed only when rollback is safe and understandable.
 - Use animation sparingly to clarify state or spatial change.
 - Never trade contrast, target size, or focus behavior for visual minimalism.
+- Before handing off a visual change, render the affected UI in a browser and compare it with the relevant `docs/screens/` references and `DESIGN.md`. Check desktop and narrow layouts, keyboard focus, and applicable async states; include screenshots and explain intentional deviations in the PR evidence.
 
 ### shadcn / Base UI
 
@@ -281,6 +285,7 @@ A change is done when:
 - behavior matches the requirement;
 - server-side security invariants hold;
 - keyboard/focus/error/loading behavior is correct for UI work;
+- visual UI changes have been compared against the relevant `docs/screens/` references and comply with `DESIGN.md`, with evidence recorded in the handoff;
 - relevant tests exist and pass;
 - format, lint, typecheck, Rust checks, and build pass;
 - performance impact is understood;
