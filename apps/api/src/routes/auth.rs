@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
-    adapters::{add_seconds, new_resource_id, new_secret, sha256_hex},
+    adapters::{add_seconds, deliver_auth_code, new_resource_id, new_secret, sha256_hex},
     app::AppState,
     core::{ApiError, ApiErrorCode, Principal, RequestContext},
     http::auth::{clear_session_cookies, require_csrf, require_session, set_session_cookies},
@@ -58,10 +58,17 @@ pub struct LoginCompleteRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LinkIdentityRequest {
+pub struct LinkIdentityStartRequest {
     pub email: String,
     pub reauth_grant_id: String,
     pub reauth_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkIdentityRequest {
+    pub challenge_id: String,
+    pub code: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -173,6 +180,9 @@ pub async fn signup(
         ])
         .await
         .map_err(|error| database_error(&context, error))?;
+    deliver_auth_code(&state, email.as_str(), &code, "verification")
+        .await
+        .map_err(|_| service_unavailable(&context))?;
     let user = repository
         .find_user_by_id(&user_id)
         .await
@@ -331,6 +341,11 @@ pub async fn login_start(
         .batch(vec![statement])
         .await
         .map_err(|error| database_error(&context, error))?;
+    if user.is_some() {
+        deliver_auth_code(&state, email.as_str(), &code, "login")
+            .await
+            .map_err(|_| service_unavailable(&context))?;
+    }
     let response = ChallengeResponse {
         challenge_id,
         expires_at: expires_at.as_str().to_owned(),
@@ -502,36 +517,37 @@ pub async fn refresh(
 }
 
 #[worker::send]
-pub async fn link_identity(
+pub async fn link_identity_start(
     State(state): State<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
     headers: HeaderMap,
-    Json(body): Json<LinkIdentityRequest>,
+    Json(body): Json<LinkIdentityStartRequest>,
 ) -> Result<Response<Body>, ApiError> {
     let authenticated = require_session(&state, &headers, &context).await?;
     require_csrf(&headers, &authenticated.session, &context).await?;
+    if !authenticated.principal.email_verified {
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::PermissionDenied,
+            "email_verification_required",
+            "Verify your current email before linking another identity.",
+        ));
+    }
     let email = NormalizedEmail::parse(&body.email)
         .map_err(|_| validation_error(&context, "email_invalid", "Enter a valid email address."))?;
     let database = database(&state, &context)?;
     let repository = IdentityRepository::new(database);
-    if let Some(existing) = repository
+    if repository
         .find_user_by_email(email.as_str())
         .await
         .map_err(|error| database_error(&context, error))?
+        .is_some()
     {
-        if existing.user_id != authenticated.principal.user_id.as_str() {
-            return Err(domain_error(
-                &context,
-                ApiErrorCode::Conflict,
-                "identity_conflict",
-                "That identity belongs to another account.",
-            ));
-        }
         return Err(domain_error(
             &context,
             ApiErrorCode::Conflict,
             "identity_conflict",
-            "That identity is already linked.",
+            "That identity is already linked to an account.",
         ));
     }
     let reauth_hash = sha256_hex(&body.reauth_token)
@@ -554,6 +570,137 @@ pub async fn link_identity(
             ApiErrorCode::PermissionDenied,
             "reauthentication_required",
             "Complete a recent security check before linking an identity.",
+        ));
+    }
+    let challenge_id = generated_id("idn");
+    let code = new_secret();
+    let code_hash = sha256_hex(&code)
+        .await
+        .map_err(|_| service_unavailable(&context))?;
+    let expires_at = add_seconds(&context.received_at, CHALLENGE_TTL_SECONDS)
+        .map_err(|_| service_unavailable(&context))?;
+    let challenge_statement = repository
+        .insert_challenge_statement(
+            &challenge_id,
+            Some(authenticated.principal.user_id.as_str()),
+            email.as_str(),
+            ChallengeKind::IdentityLink.as_str(),
+            &code_hash,
+            &expires_at,
+            &context.received_at,
+        )
+        .map_err(|error| database_error(&context, error))?;
+    let event_id = generated_id("sec");
+    let metadata = json!({ "provider": "email" });
+    let security_statement = security_statement(
+        database,
+        &context,
+        Some(&authenticated.principal),
+        &event_id,
+        None,
+        "identity.link_started.v1",
+        "identity",
+        Some(&challenge_id),
+        "success",
+        metadata.clone(),
+    )?;
+    let outbox = outbox_statement(
+        database,
+        &context,
+        Some(&authenticated.principal),
+        None,
+        "identity.link_started.v1",
+        &metadata,
+    )?;
+    database
+        .batch(vec![challenge_statement, security_statement, outbox])
+        .await
+        .map_err(|error| database_error(&context, error))?;
+    deliver_auth_code(&state, email.as_str(), &code, "identity_link")
+        .await
+        .map_err(|_| service_unavailable(&context))?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ChallengeResponse {
+            challenge_id,
+            expires_at: expires_at.as_str().to_owned(),
+            development_code: is_development(&state).then_some(code),
+        }),
+    )
+        .into_response())
+}
+
+#[worker::send]
+pub async fn link_identity(
+    State(state): State<Arc<AppState>>,
+    Extension(context): Extension<RequestContext>,
+    headers: HeaderMap,
+    Json(body): Json<LinkIdentityRequest>,
+) -> Result<Response<Body>, ApiError> {
+    let authenticated = require_session(&state, &headers, &context).await?;
+    require_csrf(&headers, &authenticated.session, &context).await?;
+    let database = database(&state, &context)?;
+    let repository = IdentityRepository::new(database);
+    let challenge = repository
+        .find_challenge(&body.challenge_id)
+        .await
+        .map_err(|error| database_error(&context, error))?
+        .ok_or_else(|| {
+            domain_error(
+                &context,
+                ApiErrorCode::PermissionDenied,
+                "identity_conflict",
+                "The identity link challenge is invalid or expired.",
+            )
+        })?;
+    if challenge.kind != ChallengeKind::IdentityLink.as_str()
+        || challenge.user_id.as_deref() != Some(authenticated.principal.user_id.as_str())
+        || challenge.status != "pending"
+    {
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::PermissionDenied,
+            "identity_conflict",
+            "The identity link challenge is invalid or expired.",
+        ));
+    }
+    let email = NormalizedEmail::parse(&challenge.email).map_err(|_| {
+        domain_error(
+            &context,
+            ApiErrorCode::Conflict,
+            "identity_conflict",
+            "The identity link challenge is invalid or expired.",
+        )
+    })?;
+    if let Some(existing) = repository
+        .find_user_by_email(email.as_str())
+        .await
+        .map_err(|error| database_error(&context, error))?
+    {
+        let _ = existing;
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::Conflict,
+            "identity_conflict",
+            "That identity is already linked to an account.",
+        ));
+    }
+    let code_hash = sha256_hex(&body.code)
+        .await
+        .map_err(|_| service_unavailable(&context))?;
+    if !repository
+        .consume_challenge(&challenge.challenge_id, &code_hash, &context.received_at)
+        .await
+        .map_err(|error| database_error(&context, error))?
+    {
+        let _ = repository
+            .record_failed_challenge(&challenge.challenge_id)
+            .await;
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::PermissionDenied,
+            "identity_conflict",
+            "The identity link challenge is invalid or expired.",
         ));
     }
     let identity_id = generated_id("idn");
@@ -593,7 +740,11 @@ pub async fn link_identity(
         .batch(vec![statement, security_statement, outbox])
         .await
         .map_err(|error| database_error(&context, error))?;
-    Ok((StatusCode::CREATED, Json(json!({ "identity": { "id": identity_id, "provider": "email", "email": email.as_str(), "email_verified": true } }))).into_response())
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "identity": { "id": identity_id, "provider": "email", "email": email.as_str(), "email_verified": true } })),
+    )
+        .into_response())
 }
 
 #[worker::send]

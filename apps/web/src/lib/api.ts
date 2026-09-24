@@ -307,6 +307,41 @@ export async function listMembers(orgId: string, signal?: AbortSignal): Promise<
   );
 }
 
+export async function listInvitations(
+  orgId: string,
+  signal?: AbortSignal,
+): Promise<Page<Invitation>> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/invitations`,
+    signal ? { signal } : {},
+    isInvitationPage,
+  );
+}
+
+export async function revokeInvitation(
+  orgId: string,
+  invitationId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/invitations/${encodeURIComponent(invitationId)}`,
+    { method: "DELETE", ...(signal ? { signal } : {}) },
+    isEmptyResponse,
+  );
+}
+
+export async function resendInvitation(
+  orgId: string,
+  invitationId: string,
+  signal?: AbortSignal,
+): Promise<InvitationResponse> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/invitations/${encodeURIComponent(invitationId)}/resend`,
+    { method: "POST", body: {}, ...(signal ? { signal } : {}) },
+    isInvitationResponse,
+  );
+}
+
 export async function inviteMember(
   orgId: string,
   input: { email: string; role: "admin" | "member" | "viewer" },
@@ -377,6 +412,27 @@ export async function createTeam(
   );
 }
 
+export async function leaveOrganization(orgId: string, signal?: AbortSignal): Promise<void> {
+  await requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/leave`,
+    { method: "POST", body: {}, ...(signal ? { signal } : {}) },
+    isEmptyResponse,
+  );
+}
+
+export async function transitionOrganization(
+  orgId: string,
+  transition: "suspend" | "resume" | "deletion",
+  input: { version: number; reauth_grant_id: string; reauth_token: string; confirmation?: string },
+  signal?: AbortSignal,
+): Promise<Organization> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/${transition}`,
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isOrganization,
+  );
+}
+
 export async function listSessions(signal?: AbortSignal): Promise<Page<SessionSummary>> {
   return requestJson("/api/v1/account/sessions", signal ? { signal } : {}, isSessionPage);
 }
@@ -397,8 +453,19 @@ export async function reauthenticate(signal?: AbortSignal): Promise<ReauthRespon
   );
 }
 
-export async function linkEmailIdentity(
+export async function startLinkEmailIdentity(
   input: { email: string; reauth_grant_id: string; reauth_token: string },
+  signal?: AbortSignal,
+): Promise<ChallengeResponse> {
+  return requestJson(
+    "/api/v1/me/identities/link/start",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isChallengeResponse,
+  );
+}
+
+export async function linkEmailIdentity(
+  input: { challenge_id: string; code: string },
   signal?: AbortSignal,
 ): Promise<IdentityLinkResponse> {
   return requestJson(
@@ -728,6 +795,9 @@ function isOrganizationPage(value: unknown): value is Page<OrganizationSummary> 
 }
 function isMembershipPage(value: unknown): value is Page<Membership> {
   return isPage(value, isMembership);
+}
+function isInvitationPage(value: unknown): value is Page<Invitation> {
+  return isPage(value, isInvitation);
 }
 function isTeamPage(value: unknown): value is Page<Team> {
   return isPage(value, isTeam);

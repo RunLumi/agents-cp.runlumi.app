@@ -103,6 +103,7 @@ pub enum Permission {
     OrgManage,
     OrgOwnershipTransfer,
     OrgLifecycle,
+    OrgLeave,
     MembersRead,
     MembersManage,
     TeamsRead,
@@ -118,6 +119,7 @@ impl Permission {
             "org.manage" => Self::OrgManage,
             "org.ownership_transfer" => Self::OrgOwnershipTransfer,
             "org.lifecycle" => Self::OrgLifecycle,
+            "org.leave" => Self::OrgLeave,
             "members.read" => Self::MembersRead,
             "members.manage" => Self::MembersManage,
             "teams.read" => Self::TeamsRead,
@@ -133,6 +135,7 @@ impl Permission {
             Self::OrgManage => "org.manage",
             Self::OrgOwnershipTransfer => "org.ownership_transfer",
             Self::OrgLifecycle => "org.lifecycle",
+            Self::OrgLeave => "org.leave",
             Self::MembersRead => "members.read",
             Self::MembersManage => "members.manage",
             Self::TeamsRead => "teams.read",
@@ -327,6 +330,7 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
             permission,
             Permission::OrgRead
                 | Permission::OrgManage
+                | Permission::OrgLeave
                 | Permission::MembersRead
                 | Permission::MembersManage
                 | Permission::TeamsRead
@@ -335,11 +339,15 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
         ),
         MembershipRole::Member => matches!(
             permission,
-            Permission::OrgRead | Permission::MembersRead | Permission::TeamsRead
+            Permission::OrgRead
+                | Permission::OrgLeave
+                | Permission::MembersRead
+                | Permission::TeamsRead
         ),
         MembershipRole::Viewer => matches!(
             permission,
             Permission::OrgRead
+                | Permission::OrgLeave
                 | Permission::MembersRead
                 | Permission::TeamsRead
                 | Permission::AuditRead

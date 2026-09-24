@@ -22,6 +22,15 @@ WHERE device_code_hash = ?1
 LIMIT 1
 "#;
 
+const DEVICE_BY_USER_CODE_SQL: &str = r#"
+SELECT device_authorization_id, user_code_hash, device_code_hash, code_challenge,
+       code_challenge_method, device_label, status, user_id, session_id,
+       expires_at, approved_at, consumed_at, created_at
+FROM device_authorizations
+WHERE user_code_hash = ?1
+LIMIT 1
+"#;
+
 const APPROVE_DEVICE_SQL: &str = r#"
 UPDATE device_authorizations
 SET status = 'approved', user_id = ?2, approved_at = ?3
@@ -115,6 +124,18 @@ impl<'a> DeviceAuthorizationRepository<'a> {
                 DEVICE_BY_DEVICE_CODE_SQL,
                 &[BindValue::Text(device_code_hash)],
             )?
+            .first::<DeviceRow>(None)
+            .await?;
+        row.map(TryInto::try_into).transpose()
+    }
+
+    pub async fn find_by_user_code_hash(
+        &self,
+        user_code_hash: &str,
+    ) -> worker::Result<Option<DeviceAuthorizationRecord>> {
+        let row = self
+            .database
+            .prepare(DEVICE_BY_USER_CODE_SQL, &[BindValue::Text(user_code_hash)])?
             .first::<DeviceRow>(None)
             .await?;
         row.map(TryInto::try_into).transpose()

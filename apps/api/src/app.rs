@@ -4,7 +4,7 @@ use axum::{
     Router, middleware,
     routing::{delete, get, patch, post},
 };
-use worker::{Env, Queue};
+use worker::{Env, Queue, SendEmail};
 
 use crate::{
     adapters::d1::D1Adapter,
@@ -19,6 +19,8 @@ pub(crate) struct AppState {
     pub(crate) database: Option<Arc<D1Adapter>>,
     pub(crate) queue: Option<Queue>,
     pub(crate) environment: String,
+    pub(crate) email: Option<SendEmail>,
+    pub(crate) email_from: Option<String>,
 }
 
 /// Construct the HTTP router for one Worker request. Public liveness/meta
@@ -36,6 +38,8 @@ pub fn router(env: Env) -> Router {
             .var("ENVIRONMENT")
             .map(|value| value.to_string())
             .unwrap_or_else(|_| "production".to_owned()),
+        email: env.send_email("EMAIL").ok(),
+        email_from: env.var("EMAIL_FROM").ok().map(|value| value.to_string()),
     });
 
     let mut routes = Router::<Arc<AppState>>::new()
@@ -57,6 +61,10 @@ pub fn router(env: Env) -> Router {
             post(device_auth::exchange),
         )
         .route("/api/v1/me", get(auth::me))
+        .route(
+            "/api/v1/me/identities/link/start",
+            post(auth::link_identity_start),
+        )
         .route("/api/v1/me/identities/link", post(auth::link_identity))
         .route(
             "/api/v1/orgs",
@@ -94,6 +102,7 @@ pub fn router(env: Env) -> Router {
             "/api/v1/orgs/{org_id}/ownership-transfer",
             post(organizations::transfer_ownership),
         )
+        .route("/api/v1/orgs/{org_id}/leave", post(organizations::leave))
         .route(
             "/api/v1/orgs/{org_id}/suspend",
             post(organizations::suspend),

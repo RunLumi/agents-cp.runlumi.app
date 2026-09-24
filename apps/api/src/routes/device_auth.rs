@@ -22,7 +22,7 @@ use crate::{
     },
     routes::{
         errors,
-        support::{database, database_error, domain_error, secure_cookie},
+        support::{database, database_error, domain_error, outbox_statement, secure_cookie},
     },
 };
 
@@ -40,7 +40,7 @@ pub struct DeviceCodeRequest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApproveDeviceRequest {
-    pub device_authorization_id: String,
+    pub user_code: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,9 +133,35 @@ pub async fn approve(
     require_csrf(&headers, &authenticated.session, &context).await?;
     let database = database(&state, &context)?;
     let repository = DeviceAuthorizationRepository::new(database);
+    let user_code = body.user_code.trim().to_ascii_uppercase();
+    let user_code_hash = sha256_hex(&user_code)
+        .await
+        .map_err(|_| service_unavailable(&context))?;
+    let authorization = repository
+        .find_by_user_code_hash(&user_code_hash)
+        .await
+        .map_err(|error| database_error(&context, error))?
+        .ok_or_else(|| {
+            domain_error(
+                &context,
+                ApiErrorCode::PermissionDenied,
+                "device_code_invalid",
+                "The device authorization is invalid or expired.",
+            )
+        })?;
+    if authorization.status != "pending"
+        || authorization.expires_at.as_str() <= context.received_at.as_str()
+    {
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::Conflict,
+            "device_code_expired",
+            "The device authorization is no longer available.",
+        ));
+    }
     let result = repository
         .approve_statement(
-            &body.device_authorization_id,
+            &authorization.device_authorization_id,
             authenticated.principal.user_id.as_str(),
             &context.received_at,
         )
@@ -152,17 +178,25 @@ pub async fn approve(
         ));
     }
     let event_id = generated_id("sec");
-    let metadata = json!({ "device_label": "approved" });
+    let metadata = json!({ "device_label": authorization.device_label });
     let security_statement = security_statement(
         database,
         &context,
         &authenticated.principal,
         &event_id,
-        &body.device_authorization_id,
-        metadata,
+        &authorization.device_authorization_id,
+        metadata.clone(),
+    )?;
+    let outbox = outbox_statement(
+        database,
+        &context,
+        Some(&authenticated.principal),
+        None,
+        "device_code.approved.v1",
+        &metadata,
     )?;
     database
-        .batch(vec![security_statement])
+        .batch(vec![security_statement, outbox])
         .await
         .map_err(|error| database_error(&context, error))?;
     Ok(StatusCode::NO_CONTENT.into_response())
@@ -211,8 +245,9 @@ pub async fn exchange(
     let verifier_hash = sha256_hex(&body.code_verifier)
         .await
         .map_err(|_| service_unavailable(&context))?;
+    let verifier_challenge = hex_to_base64url(&verifier_hash);
     if !constant_time_eq(
-        verifier_hash.as_bytes(),
+        verifier_challenge.as_bytes(),
         authorization.code_challenge.as_bytes(),
     ) {
         return Err(domain_error(
@@ -344,6 +379,45 @@ fn generated_id(prefix: &str) -> String {
     new_resource_id(prefix).as_str().to_owned()
 }
 
+fn hex_to_base64url(hex: &str) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let bytes = hex.as_bytes();
+    let mut output = String::with_capacity(43);
+    let mut index = 0;
+    while index < bytes.len() {
+        let first = hex_byte(bytes, index);
+        let second = (index + 2 < bytes.len()).then(|| hex_byte(bytes, index + 2));
+        let third = (index + 4 < bytes.len()).then(|| hex_byte(bytes, index + 4));
+        let chunk = (u32::from(first) << 16)
+            | (u32::from(second.unwrap_or(0)) << 8)
+            | u32::from(third.unwrap_or(0));
+        output.push(ALPHABET[((chunk >> 18) & 0x3f) as usize] as char);
+        if second.is_some() {
+            output.push(ALPHABET[((chunk >> 12) & 0x3f) as usize] as char);
+        }
+        if third.is_some() {
+            output.push(ALPHABET[((chunk >> 6) & 0x3f) as usize] as char);
+            output.push(ALPHABET[(chunk & 0x3f) as usize] as char);
+        } else if second.is_some() {
+            output.push(ALPHABET[((chunk >> 6) & 0x3f) as usize] as char);
+        }
+        index += if third.is_some() {
+            6
+        } else if second.is_some() {
+            4
+        } else {
+            2
+        };
+    }
+    output
+}
+
+fn hex_byte(bytes: &[u8], index: usize) -> u8 {
+    let high = (bytes[index] as char).to_digit(16).unwrap_or(0) as u8;
+    let low = (bytes[index + 1] as char).to_digit(16).unwrap_or(0) as u8;
+    (high << 4) | low
+}
+
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     left.len() == right.len()
         && left
@@ -363,4 +437,15 @@ fn service_unavailable(context: &RequestContext) -> ApiError {
         ApiErrorCode::ServiceUnavailable,
         "The identity store is unavailable.",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hex_to_base64url;
+
+    #[test]
+    fn hex_digest_converts_to_pkce_base64url() {
+        assert_eq!(hex_to_base64url("fbff"), "-_8");
+        assert_eq!(hex_to_base64url("616263"), "YWJj");
+    }
 }

@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
-    adapters::{add_seconds, new_resource_id, new_secret, sha256_hex},
+    adapters::{add_seconds, deliver_auth_code, new_resource_id, new_secret, sha256_hex},
     app::AppState,
     core::{ApiError, ApiErrorCode, Principal, RequestContext},
-    http::auth::{require_csrf, require_session},
+    http::auth::{clear_session_cookies, require_csrf, require_session},
     modules::{
         authorization::Permission,
         identity::NormalizedEmail,
@@ -31,7 +31,7 @@ use crate::{
         errors,
         support::{
             database, database_error, deterministic_resource_id, domain_error, idempotency_key,
-            outbox_statement,
+            outbox_statement, secure_cookie,
         },
     },
 };
@@ -536,6 +536,9 @@ pub async fn invite(
         .batch(vec![invitation_statement, security_statement, outbox])
         .await
         .map_err(|error| database_error(&context, error))?;
+    deliver_auth_code(&state, email.as_str(), &token, "invitation")
+        .await
+        .map_err(|_| service_unavailable(&context))?;
     let invitation = repository
         .find_invitation(&invitation_id)
         .await
@@ -654,6 +657,20 @@ pub async fn resend_invitation(
     require_csrf(&headers, &access.session, &context).await?;
     let database = database(&state, &context)?;
     let repository = OrganizationRepository::new(database);
+    let target_email = repository
+        .find_invitation(&invitation_id)
+        .await
+        .map_err(|error| database_error(&context, error))?
+        .filter(|invitation| invitation.org_id == org_id)
+        .map(|invitation| invitation.email)
+        .ok_or_else(|| {
+            domain_error(
+                &context,
+                ApiErrorCode::NotFound,
+                "resource_not_found",
+                "The invitation was not found.",
+            )
+        })?;
     let token = new_secret();
     let token_hash = sha256_hex(&token)
         .await
@@ -693,6 +710,9 @@ pub async fn resend_invitation(
             "The invitation is no longer available.",
         ));
     }
+    deliver_auth_code(&state, &target_email, &token, "invitation")
+        .await
+        .map_err(|_| service_unavailable(&context))?;
     let refreshed = repository
         .find_invitation(&invitation_id)
         .await
@@ -738,6 +758,16 @@ pub async fn accept_invitation(
             )
         })?;
     if invitation.status == "accepted" {
+        if invitation.accepted_by_user_id.as_deref()
+            != Some(authenticated.principal.user_id.as_str())
+        {
+            return Err(domain_error(
+                &context,
+                ApiErrorCode::PermissionDenied,
+                "invitation_replayed",
+                "The invitation is no longer available.",
+            ));
+        }
         let organization = repository
             .find_organization(&invitation.org_id)
             .await
@@ -956,6 +986,93 @@ pub async fn change_role(
 }
 
 #[worker::send]
+pub async fn leave(
+    State(state): State<Arc<AppState>>,
+    Extension(context): Extension<RequestContext>,
+    headers: HeaderMap,
+    Path(org_id): Path<String>,
+    Json(_body): Json<EmptyRequest>,
+) -> Result<Response<Body>, ApiError> {
+    let access = authorize_org(
+        &state,
+        &headers,
+        &context,
+        &org_id,
+        Permission::OrgLeave,
+        Some("membership"),
+        None,
+    )
+    .await?;
+    require_csrf(&headers, &access.session, &context).await?;
+    let database = database(&state, &context)?;
+    let repository = OrganizationRepository::new(database);
+    let role = crate::modules::authorization::MembershipRole::parse(&access.membership.role)
+        .ok_or_else(|| service_unavailable(&context))?;
+    let owner_count = repository
+        .active_owner_count(&org_id)
+        .await
+        .map_err(|error| database_error(&context, error))?;
+    if !crate::modules::memberships::can_leave(role, owner_count) {
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::Conflict,
+            "last_owner_required",
+            "Transfer ownership before leaving this organization.",
+        ));
+    }
+    if !repository
+        .remove_member(
+            &access.membership.membership_id,
+            &org_id,
+            access.membership.version,
+            &context.received_at,
+        )
+        .await
+        .map_err(|error| database_error(&context, error))?
+    {
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::Conflict,
+            "last_owner_required",
+            "Transfer ownership before leaving this organization.",
+        ));
+    }
+    IdentityRepository::new(database)
+        .revoke_user_sessions_statement(access.principal.user_id.as_str(), &context.received_at)
+        .map_err(|error| database_error(&context, error))?
+        .run()
+        .await
+        .map_err(|error| database_error(&context, error))?;
+    let event_id = generated_id("sec");
+    let security_statement = security_statement(
+        database,
+        &context,
+        &access.principal,
+        &event_id,
+        Some(&org_id),
+        "membership.left.v1",
+        "membership",
+        Some(&access.membership.membership_id),
+        json!({}),
+    )?;
+    let outbox = outbox_statement(
+        database,
+        &context,
+        Some(&access.principal),
+        Some(&org_id),
+        "membership.left.v1",
+        &json!({}),
+    )?;
+    database
+        .batch(vec![security_statement, outbox])
+        .await
+        .map_err(|error| database_error(&context, error))?;
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    clear_session_cookies(&mut response, secure_cookie(&state));
+    Ok(response)
+}
+
+#[worker::send]
 pub async fn remove_member(
     State(state): State<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
@@ -1011,6 +1128,12 @@ pub async fn remove_member(
             "The last active owner cannot be removed.",
         ));
     }
+    IdentityRepository::new(database)
+        .revoke_user_sessions_statement(&target.user_id, &context.received_at)
+        .map_err(|error| database_error(&context, error))?
+        .run()
+        .await
+        .map_err(|error| database_error(&context, error))?;
     let event_id = generated_id("sec");
     let security_statement = security_statement(
         database,

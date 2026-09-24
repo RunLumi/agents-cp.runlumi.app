@@ -131,6 +131,12 @@ SET revoked_at = ?2, revoked_reason = ?3
 WHERE user_id = ?1 AND session_id <> ?4 AND revoked_at IS NULL
 "#;
 
+const REVOKE_USER_SESSIONS_SQL: &str = r#"
+UPDATE login_sessions
+SET revoked_at = ?2, revoked_reason = 'membership_removed'
+WHERE user_id = ?1 AND revoked_at IS NULL
+"#;
+
 const REVOKE_OWNED_SESSION_SQL: &str = r#"
 UPDATE login_sessions
 SET revoked_at = ?2, revoked_reason = ?3
@@ -663,6 +669,17 @@ impl<'a> IdentityRepository<'a> {
             .run()
             .await?;
         Ok(D1Adapter::changes(&result)? == 1)
+    }
+
+    pub fn revoke_user_sessions_statement(
+        &self,
+        user_id: &str,
+        now: &Timestamp,
+    ) -> worker::Result<D1PreparedStatement> {
+        self.database.prepare(
+            REVOKE_USER_SESSIONS_SQL,
+            &[BindValue::Text(user_id), BindValue::Text(now.as_str())],
+        )
     }
 
     pub fn revoke_session_statement(

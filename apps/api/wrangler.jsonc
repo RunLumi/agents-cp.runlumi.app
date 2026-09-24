@@ -51,6 +51,9 @@
     "command": "worker-build --release",
   },
   "env": {
+    "production": {
+      "send_email": [{ "name": "EMAIL" }],
+    },
     "development": {
       "name": "lumi-agents-control-plane-api-development",
       "vars": {

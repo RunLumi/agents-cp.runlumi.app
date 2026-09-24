@@ -50,7 +50,7 @@ LIMIT 1
 const MEMBERS_BY_ORG_SQL: &str = r#"
 SELECT membership_id, org_id, user_id, role, status, version, invited_by_user_id, joined_at, created_at, updated_at
 FROM memberships
-WHERE org_id = ?1 AND status <> 'removed'
+WHERE org_id = ?1
 ORDER BY created_at ASC, membership_id ASC
 LIMIT ?2 OFFSET ?3
 "#;
@@ -154,7 +154,11 @@ WHERE membership_id = ?1 AND org_id = ?3 AND status = 'active' AND version = ?4
 
 const TRANSFER_OWNERSHIP_SQL: &str = r#"
 UPDATE memberships
-SET role = CASE WHEN membership_id = ?1 THEN 'owner' ELSE role END,
+SET role = CASE
+        WHEN membership_id = ?1 THEN 'owner'
+        WHEN role = 'owner' THEN 'admin'
+        ELSE role
+    END,
     version = version + 1,
     updated_at = ?4
 WHERE org_id = ?2
@@ -274,6 +278,11 @@ struct OrgSummaryRow {
     role: String,
     status: String,
     membership_version: i64,
+}
+
+#[derive(Deserialize)]
+struct OwnerCountRow {
+    owner_count: i64,
 }
 
 #[derive(Deserialize)]
@@ -486,6 +495,18 @@ impl<'a> OrganizationRepository<'a> {
             .first::<TeamRow>(None)
             .await?;
         result.map(TryInto::try_into).transpose()
+    }
+
+    pub async fn active_owner_count(&self, org_id: &str) -> worker::Result<u32> {
+        let row = self
+            .database
+            .prepare(
+                "SELECT COUNT(*) AS owner_count FROM memberships WHERE org_id = ?1 AND role = 'owner' AND status = 'active'",
+                &[BindValue::Text(org_id)],
+            )?
+            .first::<OwnerCountRow>(None)
+            .await?;
+        Ok(row.map_or(0, |row| row.owner_count.max(0) as u32))
     }
 
     pub async fn list_members(

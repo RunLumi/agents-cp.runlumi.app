@@ -31,7 +31,7 @@ authorize(principal, explicit_org, active_membership, permission, resource_conte
 
 The decision includes principal, org state, membership role/status/version, stable permission, resource type/id/org, and optional team/project scope. It denies unknown permissions, missing context, inactive membership, suspended/pending-deletion orgs, stale membership, and resource-org mismatch. Every protected route uses this service; handlers do not compare role strings.
 
-Default role IDs: `owner`, `admin`, `member`, `viewer`. P02 permissions: `org.read`, `org.manage`, `members.read`, `members.manage`, `teams.read`, `teams.manage`, `audit.read`. Owner has all P02 permissions and minimum ownership recovery; admin has all except ownership-only transfer; member has `org.read`, `members.read`, `teams.read`; viewer has read-only permissions.
+Default role IDs: `owner`, `admin`, `member`, `viewer`. P02 permissions: `org.read`, `org.manage`, `org.lifecycle`, `org.leave`, `org.ownership_transfer`, `members.read`, `members.manage`, `teams.read`, `teams.manage`, `audit.read`. Owner has all P02 permissions and minimum ownership recovery; admin has all except lifecycle/ownership transfer; member has `org.read`, `org.leave`, `members.read`, `teams.read`; viewer has read-only permissions plus `org.leave`.
 
 Stable denial/lifecycle reasons in `error.details.reason`: `email_verification_required`, `membership_required`, `permission_denied`, `org_context_mismatch`, `resource_scope_mismatch`, `organization_suspended`, `organization_pending_deletion`, `last_owner_required`, `invitation_expired`, `invitation_revoked`, `invitation_replayed`, `invitation_email_mismatch`, `identity_conflict`, `session_revoked`, `session_expired`, `reauthentication_required`, `device_code_expired`, `device_code_replayed`, and `version_conflict`.
 
@@ -48,8 +48,10 @@ All routes are under `/api/v1`, use JSON, return P01 errors, and include `X-Requ
 | POST | `/auth/logout` | session | `{}` | `204` |
 | POST | `/auth/refresh` | session | `{}` | `200 {user}` + rotated cookies |
 | GET | `/me` | session | — | `200 {user,organizations}` |
+| POST | `/me/identities/link/start` | session + reauth | `{email,reauth_grant_id,reauth_token}` | `202 ChallengeResponse`; dev-only code |
+| POST | `/me/identities/link` | session + link challenge | `{challenge_id,code}` | `201 {identity}` |
 | POST | `/auth/device-code` | anonymous | `{device_name,code_challenge,code_challenge_method}` | `201 {device_authorization,user_code,verification_uri,expires_at}` |
-| POST | `/auth/device-code/approve` | session | `{device_authorization_id}` | `204` |
+| POST | `/auth/device-code/approve` | session | `{user_code}` | `204` |
 | POST | `/auth/device-code/exchange` | anonymous | `{device_code,code_verifier}` | `200 {session}` + device cookies |
 | POST | `/orgs` | verified session | `{display_name,slug?}` | `201 {organization,membership}` |
 | GET | `/orgs` | session | — | `200 Page<OrganizationSummary>` |
@@ -57,10 +59,17 @@ All routes are under `/api/v1`, use JSON, return P01 errors, and include `X-Requ
 | PATCH | `/orgs/:org_id` | `org.manage` | `{display_name?,slug?,version}` | `200 Organization` |
 | GET | `/orgs/:org_id/members` | `members.read` | `limit?,cursor?` | `200 Page<Member>` |
 | POST | `/orgs/:org_id/invitations` | `members.manage` | `{email,role}` | `201 Invitation`; dev-only token |
-| POST | `/invitations/:invitation_id/accept` | verified session | `{}` | `200 {organization,membership}` |
+| GET | `/orgs/:org_id/invitations` | `members.read` | `limit?,cursor?` | `200 Page<Invitation>` |
+| DELETE | `/orgs/:org_id/invitations/:invitation_id` | `members.manage` | — | `204` |
+| POST | `/orgs/:org_id/invitations/:invitation_id/resend` | `members.manage` | `{}` | `200 Invitation`; dev-only token |
+| POST | `/invitations/:invitation_id/accept` | verified session | `{token}` | `200 {organization,membership}` |
 | PATCH | `/orgs/:org_id/members/:member_id` | `members.manage` | `{role,version}` | `200 Member` |
 | DELETE | `/orgs/:org_id/members/:member_id` | `members.manage` | version/If-Match | `204` |
-| POST | `/orgs/:org_id/ownership-transfer` | `org.manage` + reauth | `{target_member_id,reauth_grant_id,version}` | `200 {organization,membership}` |
+| POST | `/orgs/:org_id/ownership-transfer` | `org.ownership_transfer` + reauth | `{target_member_id,reauth_grant_id,reauth_token}` | `200 {organization,membership}` |
+| POST | `/orgs/:org_id/leave` | `org.leave` | `{}` | `204` |
+| POST | `/orgs/:org_id/suspend` | `org.lifecycle` + reauth | `{version,reauth_grant_id,reauth_token}` | `200 Organization` |
+| POST | `/orgs/:org_id/resume` | `org.lifecycle` + reauth | `{version,reauth_grant_id,reauth_token}` | `200 Organization` |
+| POST | `/orgs/:org_id/deletion` | `org.lifecycle` + reauth | `{version,reauth_grant_id,reauth_token,confirmation}` | `200 Organization` |
 | GET/POST | `/orgs/:org_id/teams` | `teams.read` / `teams.manage` | cursor / `{name,slug}` | page / `201 Team` |
 | POST/DELETE | `/orgs/:org_id/teams/:team_id/members` | `teams.manage` | `{member_id}` | `201 TeamMember` / `204` |
 | GET | `/orgs/:org_id/audit` | `audit.read` | cursor/filter | `200 Page<AuditEvent>` |
@@ -79,7 +88,7 @@ Desktop flow is create pending code → authenticated browser approval → one-t
 
 ## Persistence
 
-Migration `0002_p02_identity_organizations.sql` creates all P02 tables with `org_id` on tenant-owned rows, normalized-email/slug uniqueness, `(org_id,user_id)` membership uniqueness, one-time hash uniqueness, state checks, and indexes for org/member/session/audit lookups. D1 is canonical; invariant-bearing mutations use D1 batches and conditional version predicates. There is no KV authorization cache, Durable Object database, or process-global tenant state.
+Migration `0002_p02_identity_organizations.sql` creates the base P02 tables; `0003_p02_auth_rate_limits.sql` adds bounded auth buckets; `0004_p02_identity_link_challenges.sql` extends the challenge kind for verified identity linking; `0005_p02_multiple_email_identities.sql` permits multiple verified email identities per user while retaining global provider-subject uniqueness; `0006_p02_device_consumed_state.sql` preserves the approved user binding when a device authorization is consumed. All tenant-owned rows carry `org_id`; normalized-email/slug uniqueness, `(org_id,user_id)` membership uniqueness, one-time hash uniqueness, state checks, and indexes are enforced. D1 is canonical; invariant-bearing mutations use D1 batches and conditional version predicates. There is no KV authorization cache, Durable Object database, or process-global tenant state.
 
 P01 clients remain compatible: P01 errors, IDs, pagination, idempotency, and outbox shapes do not change. P02 adds only `/api/v1` routes and optional fields. A required contract change must use `docs/implementation/templates/change-request.md` before dependent packets proceed.
 
@@ -88,10 +97,10 @@ P01 clients remain compatible: P01 errors, IDs, pagination, idempotency, and out
 - Browser session cookie: `lumi_session`, opaque revocable value, `HttpOnly`, `Path=/`, `SameSite=Lax`, 30-day maximum; production adds `Secure`. The non-HttpOnly `lumi_csrf` cookie is paired with `X-CSRF-Token` on every cookie-authenticated mutation. Access/refresh material is never placed in a URL or local storage.
 - Refresh rotates the session row and revokes the old row. A revoked/expired row is filtered during the current D1 lookup. Auth rate limits use a D1-backed, server-digested 15-minute bucket (5 signup attempts and 10 login starts per normalized identity bucket); the raw email/IP is not persisted.
 - `X-Org-ID`, when supplied, must exactly equal the `:org_id` path. A mismatch is `org_context_mismatch`; there is no fallback.
-- Identity linking requires a current session, CSRF, and a short-lived reauthentication grant with purpose `identity_link`. A verified identity already owned by another user returns `identity_conflict` and is never merged.
+- Identity linking is challenge-based: a current session, CSRF, and a short-lived reauthentication grant with purpose `identity_link` start a one-time email challenge; the final link consumes that challenge and its code. A verified identity already owned by another user returns `identity_conflict` and is never merged.
 - Invitation administration includes list, revoke, and resend. Resend rotates the token hash and expiry; accepted invitations cannot be replayed. Member leave uses the same last-owner guard as removal.
 - Owner-only `org.lifecycle` permits `active -> suspended`, `suspended -> active`, and `active -> pending_deletion` after reauth and typed confirmation. The centralized policy still denies ordinary mutations while suspended/pending deletion.
-- The complete default matrix is: Owner = all P02 permissions including `org.lifecycle` and ownership transfer; Admin = org/member/team/audit management but not lifecycle or ownership transfer; Member = `org.read`, `members.read`, `teams.read`; Viewer = the same read set. Unknown permissions and stale membership versions deny.
+- The complete default matrix is: Owner = all P02 permissions including `org.lifecycle`, `org.leave`, and ownership transfer; Admin = org/member/team/audit management plus `org.leave` but not lifecycle or ownership transfer; Member = `org.read`, `org.leave`, `members.read`, `teams.read`; Viewer = the same read set plus `org.leave`. Unknown permissions and stale membership versions deny.
 - P02 list responses use the P01 `Page<T>` envelope. The first slice accepts a bounded `limit` and rejects non-empty cursors with `invalid_cursor`; downstream packets must add opaque cursor encoding rather than exposing offsets.
 - P01 idempotency storage is used only for secret-free response projections. Auth, invitation, device, and reauth one-time flows never persist raw secrets in an idempotency response.
 

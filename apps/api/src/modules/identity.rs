@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum ChallengeKind {
     Verification,
     Login,
+    IdentityLink,
 }
 
 impl ChallengeKind {
@@ -14,6 +15,7 @@ impl ChallengeKind {
         match self {
             Self::Verification => "verification",
             Self::Login => "login",
+            Self::IdentityLink => "identity_link",
         }
     }
 }
