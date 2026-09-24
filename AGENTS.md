@@ -36,6 +36,16 @@ Before starting implementation work:
 
 The feature specs define **what** must exist. The implementation plans define **how work is partitioned and merged safely**.
 
+
+For every implementation packet:
+
+- create/fill the work-packet template before coding;
+- reference the merged Contract Gate commit/version;
+- do not edit `docs/implementation/STATUS.md` unless you are the assigned coordinator;
+- use `docs/implementation/templates/change-request.md` for any frozen-contract change;
+- complete the handoff section before PR review;
+- use the repository PR template as required evidence, not optional prose.
+
 ## Read first
 
 Before changing architecture, dependencies, build tooling, public API contracts, authentication, authorization, persistence, or cross-cutting UI behavior:
