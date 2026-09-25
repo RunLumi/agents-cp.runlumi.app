@@ -854,9 +854,9 @@ The following review findings are resolved normatively in this draft:
 
 After review and merge:
 
-- Contract Gate commit: the merge commit that lands this file on `main` (recorded in `STATUS.md` and `plan06` by the coordinator immediately after merge)
+- Contract Gate commit: `11341a5` (PR #22, merged to `main`)
 - Contract version: `p06-cg-v1`
-- Dependent packets unlocked: `P06-MOD-01..03`, `P06-BE-01..04`, `P06-FE-01..04`, `P06-INT-01..02`, `P06-QA-01` once the freeze is recorded on `main`
+- Dependent packets unlocked: `P06-MOD-01..03`, `P06-BE-01..04`, `P06-FE-01..04`, `P06-INT-01..02`; `P06-QA-01` unblocks when implementation packets merge
 - Change requests: `P06-CR-001`, `P06-CR-002`, `P06-CR-003`; ADR 0006 for private R2 exports
 
 After freeze, dependent packets MUST NOT silently redefine these contracts. A required change uses `docs/implementation/templates/change-request.md` before implementation changes.
