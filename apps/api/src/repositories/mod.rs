@@ -4,6 +4,7 @@
 //! values; all values are bound parameters and authorization stays outside this
 //! layer.
 
+mod ai;
 mod device;
 mod idempotency;
 mod identity;
@@ -11,6 +12,10 @@ mod organizations;
 mod outbox;
 mod security;
 
+pub use ai::{
+    AiRepository, AliasRecord, CredentialRecord, HealthRecord, InferenceRequestRecord, ModelRecord,
+    PolicyRecord, ProviderRecord, RouteRecord, RouteVersionRecord, UsageRecord,
+};
 pub use device::{DeviceAuthorizationRecord, DeviceAuthorizationRepository};
 pub use idempotency::{IdempotencyClaimToken, IdempotencyLookup, IdempotencyRepository};
 pub use identity::{

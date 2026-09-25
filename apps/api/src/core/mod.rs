@@ -21,9 +21,10 @@ pub use idempotency::{
     RequestFingerprint, StoredSuccess,
 };
 pub use identifiers::{
-    ActorId, CorrelationId, DeviceAuthorizationId, DeviceId, EventId, IdentityId, InvitationId,
-    MembershipId, OrganizationId, ReauthenticationGrantId, RequestId, ResourceId, SecurityEventId,
-    SessionId, TeamId, TeamMemberId, UserId,
+    ActorId, BudgetId, BudgetReservationId, CorrelationId, CredentialId, DeviceAuthorizationId,
+    DeviceId, EventId, IdentityId, InvitationId, MembershipId, ModelAliasId, ModelId,
+    OrganizationId, ProviderEndpointId, ProviderId, ReauthenticationGrantId, RequestId, ResourceId,
+    RouteId, RouteVersionId, SecurityEventId, SessionId, TeamId, TeamMemberId, UsageEventId, UserId,
 };
 pub use pagination::{Cursor, Page};
 pub use principal::Principal;

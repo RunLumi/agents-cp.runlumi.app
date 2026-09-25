@@ -67,7 +67,7 @@ export function AccountPanel({ me }: { me: MeResponse }) {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-[var(--shadow)]">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-[var(--shadow)]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-base font-semibold text-[var(--civic-navy)]">Account security</h2>
@@ -105,7 +105,7 @@ export function AccountPanel({ me }: { me: MeResponse }) {
           <Info label="Verification" value={me.user.email_verified ? "Verified" : "Pending"} />
         </div>
       </section>
-      <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
+      <section className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
           <div>
             <h2 className="text-base font-semibold text-[var(--civic-navy)]">Active sessions</h2>
@@ -133,7 +133,7 @@ export function AccountPanel({ me }: { me: MeResponse }) {
               >
                 <div>
                   <p className="font-medium text-[var(--civic-navy)]">{session.device_label}</p>
-                  <p className="mt-1 text-xs text-[var(--muted)]">
+                  <p className="mt-1 text-xs tabular-nums text-[var(--muted)]">
                     {session.platform} · Last seen {new Date(session.last_seen_at).toLocaleString()}
                   </p>
                 </div>
@@ -150,7 +150,7 @@ export function AccountPanel({ me }: { me: MeResponse }) {
           </ul>
         )}
       </section>
-      <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
+      <section className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
         <div className="border-b border-[var(--border)] px-5 py-4">
           <h2 className="text-base font-semibold text-[var(--civic-navy)]">Security activity</h2>
           <p className="mt-1 text-sm text-[var(--muted-strong)]">
@@ -165,7 +165,7 @@ export function AccountPanel({ me }: { me: MeResponse }) {
               <li key={event.event_id} className="flex items-start justify-between gap-4 px-5 py-3">
                 <div>
                   <p className="text-sm font-medium text-[var(--civic-navy)]">{event.action}</p>
-                  <p className="mt-1 text-xs text-[var(--muted)]">
+                  <p className="mt-1 text-xs tabular-nums text-[var(--muted)]">
                     {new Date(event.created_at).toLocaleString()}
                   </p>
                 </div>
@@ -188,6 +188,6 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 const secondaryButton =
-  "min-h-10 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-sm font-medium outline-none hover:bg-[var(--panel-hover)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 disabled:opacity-50";
+  "min-h-10 rounded-lg border border-[var(--lumi-blue)]/40 bg-[var(--panel)] px-3 text-sm font-medium text-[var(--lumi-blue)] outline-none transition hover:border-[var(--lumi-blue)]/60 hover:bg-[var(--lumi-blue-soft)] active:translate-y-px focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 const dangerButton =
-  "min-h-10 rounded-lg border border-[var(--danger)]/40 bg-[var(--panel)] px-3 text-sm font-medium text-[var(--danger)] outline-none hover:bg-[var(--danger)]/5 focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 disabled:opacity-50";
+  "min-h-10 rounded-lg border border-[var(--danger)]/40 bg-[var(--panel)] px-3 text-sm font-medium text-[var(--danger)] outline-none transition hover:bg-[var(--danger)]/5 active:translate-y-px focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";

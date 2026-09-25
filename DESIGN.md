@@ -328,6 +328,8 @@ Use glass only for the floating header and the link dock attached to the hero's 
 Both must be genuine navigation, with keyboard focus and a meaningful destination.
 Keep the system diagram, evidence, body text and product chapters opaque.
 Never nest glass inside glass or blur a whole section.
+Product chrome follows the same rule: the control plane applies this recipe to its
+floating app header and its navigation dock, while forms, tables and content panels stay opaque.
 
 ```css
 /* Opaque first: browsers without filters still get a complete material. */

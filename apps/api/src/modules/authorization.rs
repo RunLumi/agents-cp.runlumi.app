@@ -109,6 +109,14 @@ pub enum Permission {
     TeamsRead,
     TeamsManage,
     AuditRead,
+    ModelsRead,
+    ModelsManage,
+    CredentialsRead,
+    CredentialsManage,
+    RoutesRead,
+    RoutesManage,
+    InferenceUse,
+    UsageRead,
     Unknown(String),
 }
 
@@ -125,6 +133,14 @@ impl Permission {
             "teams.read" => Self::TeamsRead,
             "teams.manage" => Self::TeamsManage,
             "audit.read" => Self::AuditRead,
+            "models.read" => Self::ModelsRead,
+            "models.manage" => Self::ModelsManage,
+            "credentials.read" => Self::CredentialsRead,
+            "credentials.manage" => Self::CredentialsManage,
+            "routes.read" => Self::RoutesRead,
+            "routes.manage" => Self::RoutesManage,
+            "inference.use" => Self::InferenceUse,
+            "usage.read" => Self::UsageRead,
             _ => Self::Unknown(value.to_owned()),
         }
     }
@@ -141,6 +157,14 @@ impl Permission {
             Self::TeamsRead => "teams.read",
             Self::TeamsManage => "teams.manage",
             Self::AuditRead => "audit.read",
+            Self::ModelsRead => "models.read",
+            Self::ModelsManage => "models.manage",
+            Self::CredentialsRead => "credentials.read",
+            Self::CredentialsManage => "credentials.manage",
+            Self::RoutesRead => "routes.read",
+            Self::RoutesManage => "routes.manage",
+            Self::InferenceUse => "inference.use",
+            Self::UsageRead => "usage.read",
             Self::Unknown(value) => value,
         }
     }
@@ -148,7 +172,13 @@ impl Permission {
     fn requires_verified_email(&self) -> bool {
         !matches!(
             self,
-            Self::OrgRead | Self::MembersRead | Self::TeamsRead | Self::AuditRead
+            Self::OrgRead
+                | Self::MembersRead
+                | Self::TeamsRead
+                | Self::AuditRead
+                | Self::ModelsRead
+                | Self::RoutesRead
+                | Self::UsageRead
         )
     }
 }
@@ -336,6 +366,14 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::TeamsRead
                 | Permission::TeamsManage
                 | Permission::AuditRead
+                | Permission::ModelsRead
+                | Permission::ModelsManage
+                | Permission::CredentialsRead
+                | Permission::CredentialsManage
+                | Permission::RoutesRead
+                | Permission::RoutesManage
+                | Permission::InferenceUse
+                | Permission::UsageRead
         ),
         MembershipRole::Member => matches!(
             permission,
@@ -343,6 +381,10 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::OrgLeave
                 | Permission::MembersRead
                 | Permission::TeamsRead
+                | Permission::ModelsRead
+                | Permission::RoutesRead
+                | Permission::InferenceUse
+                | Permission::UsageRead
         ),
         MembershipRole::Viewer => matches!(
             permission,
@@ -351,6 +393,8 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::MembersRead
                 | Permission::TeamsRead
                 | Permission::AuditRead
+                | Permission::ModelsRead
+                | Permission::RoutesRead
         ),
     }
 }
