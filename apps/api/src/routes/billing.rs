@@ -36,14 +36,6 @@
 //! never the opaque provider account/subscription reference, which stays
 //! server-only.
 
-// The route table above is registered by the P06 coordinator in `app.rs`, which
-// is outside this packet's write surface. Until that registration lands, every
-// handler here is unreachable from the Worker entry point, and `lib.rs` keeps
-// `routes` private, so rustc would report the entire surface — and everything it
-// transitively uses — as dead code. The allow is scoped to this module only and
-// is removed once the routes are wired into the router.
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -112,7 +104,6 @@ use crate::{
 
 /// Idempotency scope paths. These are stable templates, so the same logical
 /// operation always shares one P01 idempotency scope.
-pub const BILLING_SUBSCRIPTION_PATH: &str = "/api/v1/orgs/{org_id}/billing/subscription";
 pub const BILLING_PORTAL_SESSION_PATH: &str = "/api/v1/orgs/{org_id}/billing/portal-session";
 pub const BILLING_CHANGE_PATH: &str = "/api/v1/orgs/{org_id}/billing/change";
 pub const BILLING_CANCEL_PATH: &str = "/api/v1/orgs/{org_id}/billing/cancel";
@@ -124,6 +115,8 @@ pub const PORTAL_REAUTH_PURPOSE: &str = "billing_portal";
 
 /// Widest override lifetime Lumi will accept for a support entitlement
 /// override. The frozen maximum is 7 days; there are no silent forever overrides.
+// Read by the support-only override entry point below.
+#[allow(dead_code)]
 pub const MAX_OVERRIDE_TTL_SECONDS: u32 = 604_800;
 
 /// How often a device license snapshot's METADATA row is refreshed. The signed
@@ -607,7 +600,7 @@ pub async fn read_provider_entitlements(
     headers: HeaderMap,
     Path(org_id): Path<String>,
 ) -> Result<Response<Body>, ApiError> {
-    let access = match authorize_org(
+    match authorize_org(
         &state,
         &headers,
         &context,
@@ -618,7 +611,7 @@ pub async fn read_provider_entitlements(
     )
     .await
     {
-        Ok(access) => access,
+        Ok(_) => {}
         Err(error) if error.error.code == ApiErrorCode::PermissionDenied => {
             authorize_org(
                 &state,
@@ -629,11 +622,10 @@ pub async fn read_provider_entitlements(
                 Some("provider_entitlement"),
                 None,
             )
-            .await?
+            .await?;
         }
         Err(error) => return Err(error),
-    };
-    let _ = access;
+    }
     let database = database(&state, &context)?;
     let repository = BillingRepository::new(database);
     let rows = repository
@@ -751,7 +743,7 @@ pub async fn create_portal_session(
         &key,
         &json!({ "plan_key": plan_key, "return_path": body.return_path }),
         success,
-        &json!({ "provider_kind": adapter.kind() }),
+        adapter.kind(),
     )
     .await
 }
@@ -826,29 +818,8 @@ pub async fn change_plan(
         .await
         .map_err(|error| database_error(&context, error))?
         .ok_or_else(|| not_found(&context))?;
-    let adapter = billing_adapter(&state);
-    let now = instant_seconds(&context)?;
-    // The adapter is the only component that knows the provider-side plan; it
-    // returns a Lumi `ProviderEvent` and never exposes a product/price ID.
-    adapter
-        .request_plan_change(&PlanChangeRequest {
-            account_reference: account.provider_account_ref.clone(),
-            from_plan_key: current_plan.plan_key.clone(),
-            to_plan_key: plan_key.clone(),
-            requested_at: now,
-        })
-        .await
-        .map_err(|error| provider_failure(&context, error))?;
-
-    let org = OrganizationId::new(&org_id).map_err(|_| not_found(&context))?;
-    let now_stored = now_instant(&context)?;
-    let next_version = subscription.version + 1;
-    // Recompute the over-limit projection against the NEW plan so the response
-    // exposes exactly what must be remediated.
-    let over_limit = over_limit_for_plan(&repository, &org, &context.received_at, &target_plan)
-        .await
-        .map_err(|error| domain_failure(&context, error))?;
-
+    // Claim the P01 idempotency scope BEFORE any outbound adapter call, so a
+    // replayed command never reaches the provider a second time.
     let mutation = prepare_scoped_mutation(
         database,
         &context,
@@ -864,6 +835,32 @@ pub async fn change_plan(
         PreparedScopedMutation::Replay(replay) => return Ok(replay_response(replay)),
         PreparedScopedMutation::Claim(claim) => claim,
     };
+
+    let adapter = billing_adapter(&state);
+    let now = instant_seconds(&context)?;
+    // The adapter is the ONLY component that knows the provider-side plan, and it
+    // answers with a Lumi `ProviderEvent`; the returned event is deliberately
+    // NOT persisted for a plan change because the durable plan pointer is the
+    // immutable Lumi `plans` row, not the provider's product/price mapping.
+    // `subscription_events` therefore records provider STATUS transitions only.
+    adapter
+        .request_plan_change(&PlanChangeRequest {
+            account_reference: account.provider_account_ref.clone(),
+            from_plan_key: current_plan.plan_key.clone(),
+            to_plan_key: plan_key.clone(),
+            requested_at: now,
+        })
+        .await
+        .map_err(|error| provider_failure(&context, error))?;
+
+    let org = OrganizationId::new(&org_id).map_err(|_| not_found(&context))?;
+    let now_stored = now_instant(&context)?;
+    let next_version = subscription.version + 1;
+    // Recompute the over-limit projection against the NEW plan so the response
+    // exposes exactly what must be remediated. A downgrade never deletes a row.
+    let over_limit = over_limit_for_plan(&repository, &org, &context.received_at, &target_plan)
+        .await
+        .map_err(|error| domain_failure(&context, error))?;
 
     let mut business_writes = vec![
         repository
@@ -1091,6 +1088,9 @@ pub async fn cancel_subscription(
 /// There is no browser route and no browser permission for this operation, so
 /// the request is a typed struct rather than an HTTP body. A support/service
 /// principal is named explicitly, and the F16 audit row records it.
+// Called by support tooling through `repositories::`/`routes::`; it has no router
+// entry, which is the point.
+#[allow(dead_code)]
 pub struct InternalOverrideRequest<'a> {
     pub org_id: &'a str,
     pub entitlement_key: &'a str,
@@ -1112,6 +1112,8 @@ pub struct InternalOverrideRequest<'a> {
 /// database-level CHECK independently refuses an override that lacks an expiry,
 /// a reason, or a granting principal, and the unique active-override index
 /// refuses a second unrevoked override for the same key/scope.
+// Support/service entry point: no router entry and no browser permission.
+#[allow(dead_code)]
 pub async fn create_internal_override(
     database: &D1Adapter,
     context: &RequestContext,
@@ -1240,6 +1242,9 @@ pub async fn create_internal_override(
 // ---------------------------------------------------------------------------
 
 /// What an authenticated provider callback produces.
+// Consumed by the `billing.sync` job consumer; there is no browser route for a
+// provider callback.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderCallbackOutcome {
     /// A new state transition was committed.
@@ -1259,6 +1264,9 @@ pub enum ProviderCallbackOutcome {
 /// body can be neither logged nor persisted on the way here. Ordering,
 /// idempotency, and the transition itself are the pure domain's job; the atomic
 /// D1 write happens in one batch.
+// Consumed by the `billing.sync` job consumer / provider webhook route; there is
+// no browser route for a provider callback.
+#[allow(dead_code)]
 pub async fn apply_provider_callback(
     database: &D1Adapter,
     context: &RequestContext,
@@ -1341,6 +1349,8 @@ pub async fn apply_provider_callback(
 /// `{"license": null, "license_error": "<frozen reason>"}` block, because a
 /// billing or signing dependency must not brick a device that needs to keep
 /// editing locally.
+// Called from the EXISTING `GET /api/v1/devices/policy` handler. There is
+// deliberately no `/devices/license` route (P06-CR-002).
 #[allow(clippy::too_many_arguments)]
 pub async fn compile_device_license_block(
     database: &D1Adapter,
@@ -1363,6 +1373,23 @@ pub async fn compile_device_license_block(
         Ok(block) => block,
         Err(error) => license_unavailable_block(error),
     }
+}
+
+/// Decide the license state when there is no subscription row.
+///
+/// WHY this is a separate pure function: no subscription row is NOT the same as
+/// a cancelled subscription. A self-service organization is created with a
+/// `license_states` projection and no provider account, so it is on the
+/// platform defaults. Reporting `Cancelled` there would tell a device its
+/// license is cancelled while the dispatcher was simultaneously letting that
+/// same organization run work — because dispatch reads the very same
+/// projection. The signed block and the server's own enforcement must never
+/// disagree, so the persisted projection is the authority in this case.
+///
+/// A missing projection AND a missing subscription means there is no
+/// commercial authority at all, which is the only genuinely fail-closed case.
+fn license_state_without_subscription(persisted: Option<LicenseState>) -> LicenseState {
+    persisted.unwrap_or(LicenseState::Cancelled)
 }
 
 async fn compile_device_license_block_inner(
@@ -1389,6 +1416,14 @@ async fn compile_device_license_block_inner(
     let provider = provider_availability(&repository, org_id)
         .await
         .unwrap_or(ProviderAvailability::Unknown);
+    // The persisted server-side projection. It is seeded with the organization,
+    // so it is present for every real tenant.
+    let persisted_license_state = repository
+        .find_license_state(org_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| LicenseState::parse(&row.state));
     let license_state = match &subscription {
         Some(row) => {
             let status =
@@ -1400,10 +1435,7 @@ async fn compile_device_license_block_inner(
                 .and_then(|value| crate::modules::entitlements::unix_seconds(&value).ok());
             license_state_for(status, provider, grace_started, now)
         }
-        // An organization with no commercial state gets a signed, fail-closed
-        // snapshot rather than an unsigned one, so the device always has a
-        // verifiable, bounded authority to reason about.
-        None => LicenseState::Cancelled,
+        None => license_state_without_subscription(persisted_license_state),
     };
     // The frozen class window, narrowed only by a persisted license-state row.
     let local_grace = repository
@@ -1982,7 +2014,7 @@ async fn commit_audit_only(
     key: &str,
     body: &Value,
     success: StoredSuccess,
-    audit_metadata: &Value,
+    provider_kind: &str,
 ) -> Result<Response<Body>, ApiError> {
     use crate::core::{
         ActorId, IdempotencyKeyDigest, IdempotencyRecord, IdempotencyScope, IdempotencyState,
@@ -2053,7 +2085,7 @@ async fn commit_audit_only(
         "billing.portal_session_created",
         org_id,
         "success",
-        &json!({ "provider_kind": audit_metadata }),
+        &json!({ "provider_kind": provider_kind }),
     )?;
     let completion = database
         .prepare(
@@ -2374,6 +2406,55 @@ mod tests {
         );
     }
 
+    /// A self-service organization has a `license_states` projection and no
+    /// provider account, because no payment provider is involved. Reporting
+    /// `Cancelled` for that state would contradict the dispatcher, which
+    /// permits the same organization to run work because it reads the same
+    /// projection. This test pins the two to one another so the contradiction
+    /// cannot come back.
+    #[test]
+    fn a_tenant_without_a_subscription_keeps_the_projection_the_dispatcher_uses() {
+        for state in [
+            LicenseState::Active,
+            LicenseState::Grace,
+            LicenseState::PastDue,
+            LicenseState::Suspended,
+        ] {
+            assert_eq!(
+                license_state_without_subscription(Some(state)),
+                state,
+                "the signed block must report exactly what dispatch enforces",
+            );
+        }
+        // Only a completely absent commercial authority fails closed.
+        assert_eq!(
+            license_state_without_subscription(None),
+            LicenseState::Cancelled,
+        );
+    }
+
+    /// The dispatch guard checks the persisted projection's state, so the
+    /// signed block has to carry the same value or a device would be told it
+    /// has a narrower license than the server is actually enforcing.
+    #[test]
+    fn the_dispatch_state_and_the_signed_state_are_the_same_vocabulary() {
+        for row in [
+            "active",
+            "grace",
+            "past_due",
+            "suspended",
+            "cancelled",
+            "expired",
+        ] {
+            let parsed = LicenseState::parse(row);
+            assert!(
+                parsed.is_some(),
+                "{row} must be a license state the block can report"
+            );
+            assert_eq!(parsed.expect("checked").as_str(), row);
+        }
+    }
+
     #[test]
     fn the_capability_matrix_keeps_local_work_alive_during_a_provider_outage() {
         let now = 1_789_000_000;
@@ -2452,9 +2533,9 @@ mod tests {
     #[test]
     fn an_unavailable_license_block_carries_a_stable_reason_only() {
         let block = license_unavailable_block(LicenseSignatureError::SigningKeyNotConfigured);
-        assert!(block["license"].is_null());
-        assert_eq!(block["license_error"], "license_key_unknown");
-        assert_eq!(block["signature_algorithm"], "ed25519");
+        assert_eq!(block["available"], json!(false));
+        assert_eq!(block["reason"], json!("license_key_unknown"));
+        assert_eq!(block["signature_algorithm"], json!("ed25519"));
         let rendered = serde_json::to_string(&block).unwrap();
         // No key material, no claim set, no provider detail.
         assert!(!rendered.contains("-----BEGIN"));
