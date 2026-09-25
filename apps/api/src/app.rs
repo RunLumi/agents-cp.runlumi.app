@@ -13,9 +13,10 @@ use crate::{
     adapters::d1::D1Adapter,
     http::{json_body_limit, request_boundary},
     routes::{
-        account, agents, ai_catalog, approvals, audit, auth, authenticators, budgets, device_auth,
-        device_runs, devices, foundation_checks, health::health, inference, meta::meta,
-        organizations, projects, runs, tools, usage,
+        account, agents, ai_catalog, approvals, audit, auth, authenticators, automations, billing,
+        budgets, data_governance, device_auth, device_runs, devices, foundation_checks,
+        health::health, inference, meta::meta, organizations, projects, runs, tools, usage,
+        webhooks,
     },
 };
 
@@ -546,6 +547,174 @@ pub fn router(env: Env) -> Router {
         .route(
             "/api/v1/account/security-events",
             get(account::security_events),
+        )
+        // ------------------------------------------------------------------
+        // P06 durable operations. Every route below is unreachable without this
+        // block, so the mount is part of the contract, not bookkeeping: the
+        // device lease routes in particular are the only way a host can ever
+        // obtain execution authority.
+        // ------------------------------------------------------------------
+        .route(
+            "/api/v1/orgs/{org_id}/automations",
+            get(automations::list_automations).post(automations::create_automation),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/automations/{automation_id}",
+            get(automations::get_automation)
+                .patch(automations::patch_automation)
+                .delete(automations::delete_automation),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/automations/{automation_id}/pause",
+            post(automations::pause_automation),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/automations/{automation_id}/resume",
+            post(automations::resume_automation),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/automations/{automation_id}/run-now",
+            post(automations::run_now),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/automations/{automation_id}/occurrences",
+            get(automations::list_occurrences),
+        )
+        .route(
+            "/api/v1/devices/automations/due",
+            get(automations::due_automations),
+        )
+        .route(
+            "/api/v1/devices/automation-occurrences/{occurrence_id}/claim",
+            post(automations::claim_occurrence),
+        )
+        .route(
+            "/api/v1/devices/automation-leases/{lease_id}/renew",
+            post(automations::renew_lease),
+        )
+        .route(
+            "/api/v1/devices/automation-occurrences/{occurrence_id}/start",
+            post(automations::start_occurrence),
+        )
+        .route(
+            "/api/v1/devices/automation-occurrences/{occurrence_id}/settle",
+            post(automations::settle_occurrence),
+        )
+        .route(
+            "/api/v1/devices/automation-occurrences/{occurrence_id}/release",
+            post(automations::release_occurrence),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/webhooks",
+            get(webhooks::list_webhooks).post(webhooks::create_webhook),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/webhooks/{endpoint_id}",
+            patch(webhooks::patch_webhook).delete(webhooks::disable_webhook),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/webhooks/{endpoint_id}/rotate-secret",
+            post(webhooks::rotate_webhook_secret),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/webhooks/{endpoint_id}/test",
+            post(webhooks::test_webhook),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/webhooks/{endpoint_id}/deliveries",
+            get(webhooks::list_webhook_deliveries),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/webhooks/deliveries/{delivery_id}/replay",
+            post(webhooks::replay_webhook_delivery),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/notification-preferences",
+            get(webhooks::get_notification_preferences)
+                .patch(webhooks::patch_notification_preferences),
+        )
+        .route("/api/v1/notifications", get(webhooks::list_notifications))
+        .route(
+            "/api/v1/notifications/{notification_id}/read",
+            post(webhooks::mark_notification_read),
+        )
+        .route(
+            "/api/v1/me/notification-preferences",
+            get(webhooks::get_my_notification_preferences)
+                .patch(webhooks::patch_my_notification_preferences),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/billing/subscription",
+            get(billing::read_subscription),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/entitlements",
+            get(billing::read_entitlements),
+        )
+        // The upstream provider projection is deliberately a SEPARATE read. It
+        // exposes normalized status/reason only and can never grant or revoke a
+        // Lumi entitlement (P06-CR-002).
+        .route(
+            "/api/v1/orgs/{org_id}/entitlements/provider",
+            get(billing::read_provider_entitlements),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/billing/portal-session",
+            post(billing::create_portal_session),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/billing/change",
+            post(billing::change_plan),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/billing/cancel",
+            post(billing::cancel_subscription),
+        )
+        .route(
+            data_governance::DATA_POLICY_PATH,
+            get(data_governance::get_data_policy).patch(data_governance::patch_data_policy),
+        )
+        .route(
+            data_governance::EXPORTS_PATH,
+            get(data_governance::list_exports).post(data_governance::create_export),
+        )
+        .route(
+            data_governance::EXPORT_PATH,
+            get(data_governance::get_export),
+        )
+        .route(
+            data_governance::EXPORT_DOWNLOAD_PATH,
+            post(data_governance::download_export),
+        )
+        .route(
+            data_governance::DELETIONS_PATH,
+            get(data_governance::list_deletions),
+        )
+        .route(
+            data_governance::DELETION_PATH,
+            get(data_governance::get_deletion),
+        )
+        .route(
+            data_governance::DELETION_RESUME_PATH,
+            post(data_governance::resume_deletion),
+        )
+        .route(
+            data_governance::ME_EXPORTS_PATH,
+            get(data_governance::list_personal_exports)
+                .post(data_governance::create_personal_export),
+        )
+        .route(
+            data_governance::ME_EXPORT_DOWNLOAD_PATH,
+            post(data_governance::download_personal_export),
+        )
+        .route(
+            data_governance::ME_DELETION_PATH,
+            get(data_governance::get_personal_deletion)
+                .post(data_governance::create_personal_deletion),
+        )
+        .route(
+            data_governance::ME_DELETION_CANCEL_PATH,
+            post(data_governance::cancel_personal_deletion),
         );
 
     if is_development {

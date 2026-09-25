@@ -17,8 +17,16 @@ pub const OUTBOX_RETRY_DELAY_SECONDS: u32 = 30;
 /// The caller passes the exact DLQ name from coordinator-owned Wrangler config.
 /// Individual messages are acknowledged only after their outbox transition is
 /// durable; store errors use bounded platform retry without logging the body.
+///
+/// The batch arrives as an UNTYPED value rather than a decoded `EventEnvelope`.
+/// P06 needs a single queue entry point for two different envelopes, and
+/// workers-rs generates the queue module under one fixed name, so the platform
+/// can only decode a batch as one type. Reading `serde_json::Value` and decoding
+/// per message keeps the P01 path byte-identical while letting a P06 job
+/// message on the same handler be recognised as a job rather than mistaken for
+/// a business event.
 pub async fn consume_queue_batch<S, H>(
-    batch: &worker::MessageBatch<EventEnvelope>,
+    batch: &worker::MessageBatch<serde_json::Value>,
     store: &S,
     handler: &H,
     now: &Timestamp,
@@ -51,7 +59,26 @@ where
 
     let consumer = OutboxConsumer::new(store, handler, &logger, retry_policy);
     for message in messages {
-        let event = message.body();
+        // A body that is not a valid business envelope can never become one on
+        // a retry, so it is acknowledged rather than redelivered forever.
+        let body = message.body();
+        // `MessageBatch<Value>::body()` yields a borrow, so the owned value is
+        // cloned here. The envelope is bounded by the queue batch limits, so the
+        // copy is small and it keeps the decode off the borrow's lifetime.
+        let Ok(event) = serde_json::from_value::<EventEnvelope>(body.clone()) else {
+            logger.log(OutboxLog {
+                action: "invalid_queue_message",
+                event_id: String::new(),
+                event_type: String::new(),
+                request_id: String::new(),
+                correlation_id: String::new(),
+                attempt_count: 0,
+                error_code: Some("invalid_event_envelope".to_owned()),
+            });
+            message.ack();
+            continue;
+        };
+        let event = &event;
         let outcome = if is_dead_letter_queue {
             consumer.consume_dead_letter(event).await
         } else {

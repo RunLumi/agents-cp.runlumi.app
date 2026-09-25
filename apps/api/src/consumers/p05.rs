@@ -486,7 +486,7 @@ impl EventHandler for P05AuditEventHandler<'_> {
 /// the existing all-event handler in `consumers/outbox.rs`.
 #[allow(dead_code)]
 pub async fn consume_p05_batch<S>(
-    batch: &worker::MessageBatch<EventEnvelope>,
+    batch: &worker::MessageBatch<serde_json::Value>,
     store: &S,
     now: &Timestamp,
     retry_policy: RetryPolicy,
@@ -503,7 +503,7 @@ where
 /// handler. The shared outbox store still owns duplicate/retry transitions.
 #[allow(dead_code)]
 pub async fn consume_p05_aware_batch<S>(
-    batch: &worker::MessageBatch<EventEnvelope>,
+    batch: &worker::MessageBatch<serde_json::Value>,
     store: &S,
     now: &Timestamp,
     retry_policy: RetryPolicy,
@@ -521,7 +521,7 @@ where
 /// dead-letter behavior as the registry-only wrapper.
 #[allow(dead_code)]
 pub async fn consume_p05_audit_batch<S>(
-    batch: &worker::MessageBatch<EventEnvelope>,
+    batch: &worker::MessageBatch<serde_json::Value>,
     store: &S,
     database: &D1Adapter,
     now: &Timestamp,

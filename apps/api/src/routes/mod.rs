@@ -9,6 +9,7 @@ pub mod authorization;
 pub mod automations;
 pub mod billing;
 pub mod budgets;
+pub mod data_governance;
 pub mod device_auth;
 pub mod device_runs;
 pub mod devices;

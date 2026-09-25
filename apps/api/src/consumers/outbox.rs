@@ -159,7 +159,7 @@ impl EventHandler for ProductEventHandler {
 /// Coordinator-facing Worker hook for P01's test consumer. Pass the configured
 /// main and dead-letter queue names from the Worker boundary, not request input.
 pub async fn consume_outbox_batch<S>(
-    batch: &worker::MessageBatch<EventEnvelope>,
+    batch: &worker::MessageBatch<serde_json::Value>,
     store: &S,
     now: &Timestamp,
     retry_policy: RetryPolicy,
