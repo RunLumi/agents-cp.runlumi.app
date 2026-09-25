@@ -136,6 +136,24 @@ pub enum Permission {
     ApprovalsResolve,
     BudgetsRead,
     BudgetsManage,
+    // P06-CG (p06-cg-v1): automations, event delivery, commercial entitlements,
+    // and data governance. Entitlement OVERRIDES are deliberately absent: they
+    // are internal/support-only and have no browser permission and no public
+    // route (P06-CR-002).
+    AutomationsRead,
+    AutomationsManage,
+    AutomationsRun,
+    WebhooksRead,
+    WebhooksManage,
+    NotificationsRead,
+    NotificationsManage,
+    BillingRead,
+    BillingManage,
+    EntitlementsRead,
+    DataRead,
+    DataManage,
+    DataExport,
+    DataDelete,
     Unknown(String),
 }
 
@@ -177,6 +195,20 @@ impl Permission {
             "approvals.resolve" => Self::ApprovalsResolve,
             "budgets.read" => Self::BudgetsRead,
             "budgets.manage" => Self::BudgetsManage,
+            "automations.read" => Self::AutomationsRead,
+            "automations.manage" => Self::AutomationsManage,
+            "automations.run" => Self::AutomationsRun,
+            "webhooks.read" => Self::WebhooksRead,
+            "webhooks.manage" => Self::WebhooksManage,
+            "notifications.read" => Self::NotificationsRead,
+            "notifications.manage" => Self::NotificationsManage,
+            "billing.read" => Self::BillingRead,
+            "billing.manage" => Self::BillingManage,
+            "entitlements.read" => Self::EntitlementsRead,
+            "data.read" => Self::DataRead,
+            "data.manage" => Self::DataManage,
+            "data.export" => Self::DataExport,
+            "data.delete" => Self::DataDelete,
             _ => Self::Unknown(value.to_owned()),
         }
     }
@@ -218,6 +250,20 @@ impl Permission {
             Self::ApprovalsResolve => "approvals.resolve",
             Self::BudgetsRead => "budgets.read",
             Self::BudgetsManage => "budgets.manage",
+            Self::AutomationsRead => "automations.read",
+            Self::AutomationsManage => "automations.manage",
+            Self::AutomationsRun => "automations.run",
+            Self::WebhooksRead => "webhooks.read",
+            Self::WebhooksManage => "webhooks.manage",
+            Self::NotificationsRead => "notifications.read",
+            Self::NotificationsManage => "notifications.manage",
+            Self::BillingRead => "billing.read",
+            Self::BillingManage => "billing.manage",
+            Self::EntitlementsRead => "entitlements.read",
+            Self::DataRead => "data.read",
+            Self::DataManage => "data.manage",
+            Self::DataExport => "data.export",
+            Self::DataDelete => "data.delete",
             Self::Unknown(value) => value,
         }
     }
@@ -240,6 +286,15 @@ impl Permission {
                 | Self::ToolsRead
                 | Self::ApprovalsRead
                 | Self::BudgetsRead
+                // P06: reading automations, notifications, entitlements, or the
+                // data-governance summary is observation, not action, so it is
+                // treated like every other `*Read` permission here. Every
+                // mutating P06 permission (run/manage/export/delete) still
+                // requires a verified email.
+                | Self::AutomationsRead
+                | Self::NotificationsRead
+                | Self::EntitlementsRead
+                | Self::DataRead
         )
     }
 }
@@ -452,6 +507,20 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::ApprovalsResolve
                 | Permission::BudgetsRead
                 | Permission::BudgetsManage
+                | Permission::AutomationsRead
+                | Permission::AutomationsManage
+                | Permission::AutomationsRun
+                | Permission::WebhooksRead
+                | Permission::WebhooksManage
+                | Permission::NotificationsRead
+                | Permission::NotificationsManage
+                | Permission::BillingRead
+                | Permission::BillingManage
+                | Permission::EntitlementsRead
+                | Permission::DataRead
+                | Permission::DataManage
+                | Permission::DataExport
+                | Permission::DataDelete
         ),
         MembershipRole::Member => matches!(
             permission,
@@ -474,6 +543,16 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::ToolsRead
                 | Permission::ApprovalsRead
                 | Permission::BudgetsRead
+                // P06: a member may read and run automations within visible
+                // projects. Webhook/billing/data administration stays with
+                // admins: those mutate org-wide configuration and can export or
+                // delete organization data.
+                | Permission::AutomationsRead
+                | Permission::AutomationsRun
+                | Permission::NotificationsRead
+                | Permission::NotificationsManage
+                | Permission::EntitlementsRead
+                | Permission::DataRead
         ),
         MembershipRole::Viewer => matches!(
             permission,
@@ -493,6 +572,13 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::ToolsRead
                 | Permission::ApprovalsRead
                 | Permission::BudgetsRead
+                // P06: a viewer is strictly read-only. It may SEE automations,
+                // entitlements, and the data-governance summary, but may not run,
+                // administer, export, or delete anything.
+                | Permission::AutomationsRead
+                | Permission::NotificationsRead
+                | Permission::EntitlementsRead
+                | Permission::DataRead
         ),
     }
 }
@@ -763,5 +849,71 @@ mod tests {
             ),
             AuthorizationDecision::Deny(DenyReason::PermissionDenied)
         );
+    }
+
+    /// P06-CG freezes the P06 role split: owners/admins receive every P06
+    /// browser permission, members may read and RUN automations but may not
+    /// administer webhooks/billing or export/delete org data, and viewers are
+    /// strictly read-only. This test pins that matrix so a future grant widening
+    /// fails review here rather than shipping.
+    #[test]
+    fn p06_roles_keep_durable_operations_separate() {
+        let (user, org, user_id, membership_id) = principal(true);
+        let organization = OrganizationContext {
+            organization_id: org.clone(),
+            state: OrganizationState::Active,
+            version: 1,
+        };
+        let allow = |permission: &Permission, role: MembershipRole| {
+            let membership =
+                make_membership(org.clone(), user_id.clone(), membership_id.clone(), role);
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&membership),
+                permission,
+                None,
+            )
+            .is_allowed()
+        };
+
+        // A member may read and run automations.
+        assert!(allow(&Permission::AutomationsRead, MembershipRole::Member));
+        assert!(allow(&Permission::AutomationsRun, MembershipRole::Member));
+        // ...but may not administer webhooks, change billing, or export/delete.
+        assert!(!allow(&Permission::WebhooksManage, MembershipRole::Member));
+        assert!(!allow(&Permission::BillingManage, MembershipRole::Member));
+        assert!(!allow(&Permission::DataExport, MembershipRole::Member));
+        assert!(!allow(&Permission::DataDelete, MembershipRole::Member));
+
+        // A viewer is read-only across every P06 surface.
+        assert!(allow(&Permission::AutomationsRead, MembershipRole::Viewer));
+        assert!(!allow(&Permission::AutomationsRun, MembershipRole::Viewer));
+        assert!(!allow(&Permission::DataExport, MembershipRole::Viewer));
+
+        // An admin receives the full P06 browser surface.
+        assert!(allow(&Permission::WebhooksManage, MembershipRole::Admin));
+        assert!(allow(&Permission::BillingManage, MembershipRole::Admin));
+        assert!(allow(&Permission::DataExport, MembershipRole::Admin));
+        assert!(allow(&Permission::DataDelete, MembershipRole::Admin));
+        assert!(allow(&Permission::AutomationsManage, MembershipRole::Owner));
+    }
+
+    /// P06-CR-002: entitlement overrides are internal/support-only. There must
+    /// be no browser permission that could authorize one, and the stable code
+    /// space must not contain one either — a future addition would let a support
+    /// override leak into a self-service browser surface.
+    #[test]
+    fn p06_exposes_no_entitlement_override_permission() {
+        for code in [
+            "entitlements.manage",
+            "entitlements.override",
+            "entitlements.grant",
+        ] {
+            assert!(
+                matches!(Permission::parse(code), Permission::Unknown(_)),
+                "{code} must not resolve to a real permission"
+            );
+        }
     }
 }
