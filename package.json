@@ -1,8 +1,8 @@
 {
   "name": "lumi-agents-control-plane",
   "version": "0.0.0",
-  "license": "UNLICENSED",
   "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "pnpm -r --parallel --stream --filter @runlumi/agents-cp-api --filter @runlumi/agents-cp-web dev",
     "build": "pnpm -r --filter @runlumi/agents-cp-api --filter @runlumi/agents-cp-web build",

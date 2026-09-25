@@ -45,7 +45,7 @@ Automation specifies required environment:
 
 Server decides due work and issues a lease/dispatch to eligible device.
 
-A device MUST atomically claim work to avoid duplicate side effects.
+A device MUST atomically claim work to avoid duplicate side effects. A lease that expires after execution may have begun is marked `ambiguous` and cannot be automatically reissued; this distributed boundary is normative in `P06-CR-001`.
 
 ### FR-F15-005 — Idempotency
 
@@ -67,7 +67,7 @@ Do not use stale authorization captured when schedule was created.
 
 ### FR-F15-007 — Off-peak
 
-Org may designate off-peak windows, lower-cost route aliases and mutation restrictions.
+Org may designate off-peak eligibility sources and windows, lower-cost route aliases, and mutation restrictions. P06 supports both an organization-window mode and the existing ZCode provider-ticket/no-clock mode; the eligibility source is explicit and the server never silently converts one into the other.
 
 ZCode already separates off-peak tasks and applies special tool restrictions; preserve that safety distinction.
 
@@ -103,6 +103,6 @@ Policy:
 
 ## Acceptance criteria
 
-- Two devices cannot execute the same leased occurrence simultaneously.
+- At most one current server-authorized lease exists for an occurrence. If a lease expires after execution may have started, the occurrence enters an audited `ambiguous` reconciliation state and is not automatically re-dispatched; a second device cannot claim it.
 - Paused/suspended org stops new dispatch.
 - Missed-run behavior is deterministic and visible.

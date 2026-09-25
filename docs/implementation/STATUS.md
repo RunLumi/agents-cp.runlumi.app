@@ -7,11 +7,11 @@ Last initialized: 2026-09-24
 ## Current phase
 
 - Active execution model: **P00**
-- Current implementation phases: **P05 complete; P04 implemented/review; P03 complete**
-- Next implementable phase: **P06 planning is dependency-unblocked by the completed P05 conditional gate; P06 remains blocked until its coordinator activates the plan**
-- Current Contract Gates: **P02-CG `p02-cg-v2`; P03-CG `p03-cg-v1`; P04-CG `p04-cg-v1`; P05-CG `p05-cg-v1` (freeze `b5a5ea8`)**
-- Shared-file owner: **P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
-- Integration owner: **P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
+- Current implementation phases: **P06 implementation ready (Contract Gate frozen); P05 complete; P04 implemented/review; P03 complete**
+- Next implementable phase: **P06 MOD/BE/FE/INT/QA packets are unblocked by frozen `p06-cg-v1`; start with P06-MOD-01..03 and P06-BE-01**
+- Current Contract Gates: **P02-CG `p02-cg-v2`; P03-CG `p03-cg-v1`; P04-CG `p04-cg-v1`; P05-CG `p05-cg-v1`; P06-CG `p06-cg-v1` (frozen)**
+- Shared-file owner: **P06 coordinator for P06; P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
+- Integration owner: **P06 coordinator for P06; P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
 
 ## Phase status
 
@@ -23,7 +23,7 @@ Last initialized: 2026-09-24
 | P03 | complete | frozen: `p03-cg-v1` (PR #9; +P03-CR-001) | PASS: `docs/implementation/gates/P03-IG.md` | PR #11 (MOD/BE) + PR #14 (FE/QA) merged, hosted CI green; local smoke 17/17 |
 | P04 | review | frozen: `p04-cg-v1` (`57b2df9`) | conditional: `docs/implementation/gates/P04-IG.md` | P03 is merged and the combined P03/P04 smoke passes; P04 vertical slice, 131 Rust tests, Worker/WASM builds, hostile smoke, idempotency/health/policy extensions, authenticated desktop/narrow/editor captures, and handoffs pass; local downstream-disconnect delivery remains an explicit runtime follow-up |
 | P05 | complete | frozen: `p05-cg-v1` (`b5a5ea8`; CR-001/CR-002 accepted) | conditional PASS: `docs/implementation/gates/P05-IG.md` | PR #18 merged as `976a40b`; 185-check fresh-D1/Worker managed loop passes; generic privileged approval, accounting, hostile cases, timeline/audit, and hard-budget denial pass; public CUA/browser execution and passive cancellation remain explicit limitations |
-| P06 | blocked | blocked | blocked | waits for P05 |
+| P06 | implementation ready | frozen: `p06-cg-v1` (PR #22; CR-001/002/003 + ADR 0006) | pending | Contract Gate and fixture reviewed against control-plane, ZCode, FE, and contract audits; MOD/BE/FE/INT/QA packets unblocked; shared-file ownership assigned |
 | P07 | blocked | blocked | blocked | demand/dependency gated |
 | P08 | blocked | blocked | blocked | waits for integration foundations |
 | P09 | blocked | blocked | blocked | release hardening only |
@@ -138,6 +138,27 @@ P04 packets remain marked `review` until the coordinator's change is committed/P
 | P05-QA-01 | merged | Managed control-loop integration and hostile matrix |
 
 P05 Contract Gate `p05-cg-v1` is frozen at `b5a5ea8`; no dependent packet may redefine its contracts without a Change Request. Coordinator evidence is recorded in `docs/implementation/evidence/P05-IG-2026-09-25.md`; PR #18 merged the control plane as `976a40b`, and external LumiAgents PR #29 merged the managed integration seams as `9dc43d6`.
+
+## P06 packet status
+
+| Packet | State | Notes |
+|---|---|---|
+| P06-MOD-01 | ready | Scheduler/occurrence/lease/off-peak semantics |
+| P06-MOD-02 | ready | Entitlement evaluator and license/grace matrix |
+| P06-MOD-03 | ready | Retention/deletion planner and data-class registry |
+| P06-BE-01 | ready | Automation APIs, migration `0011_p06_automations.sql`, dispatcher |
+| P06-BE-02 | ready | Notifications/webhooks, migration `0012_p06_event_delivery.sql` |
+| P06-BE-03 | ready | Billing/entitlements/license, migration `0013_p06_billing_entitlements.sql` |
+| P06-BE-04 | ready | Export/deletion jobs, migration `0014_p06_data_governance.sql`, R2 adapter |
+| P06-FE-01 | ready | Automations UI (builds from frozen fixture) |
+| P06-FE-02 | ready | Webhooks/notifications UI (builds from frozen fixture) |
+| P06-FE-03 | ready | Billing/entitlements UI (builds from frozen fixture) |
+| P06-FE-04 | ready | Data controls UI (builds from frozen fixture) |
+| P06-INT-01 | ready | Managed automation execution (LumiAgents lease/fence seam) |
+| P06-INT-02 | ready | Licensing snapshot integration (existing `/devices/policy` authority) |
+| P06-QA-01 | blocked | Durable operations integration gate; unblocks when implementation packets merge |
+
+P06 Contract Gate `p06-cg-v1` is frozen in `docs/implementation/gates/P06-CG.md` with fixture `docs/implementation/fixtures/p06-contracts-v1.json`. Normative clarifications: `P06-CR-001` (lease fencing/`ambiguous`, calendar intervals, off-peak execution class), `P06-CR-002` (entitlement/license separation, internal-only overrides, provider projection), `P06-CR-003` (P02 deletion bridge, private R2 per ADR 0006). No implementation packet may silently redefine these contracts.
 
 ## Rule
 
