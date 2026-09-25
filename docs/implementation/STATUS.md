@@ -23,7 +23,7 @@ Last initialized: 2026-09-24
 | P03 | complete | frozen: `p03-cg-v1` (PR #9; +P03-CR-001) | PASS: `docs/implementation/gates/P03-IG.md` | PR #11 (MOD/BE) + PR #14 (FE/QA) merged, hosted CI green; local smoke 17/17 |
 | P04 | review | frozen: `p04-cg-v1` (`57b2df9`) | conditional: `docs/implementation/gates/P04-IG.md` | P03 is merged and the combined P03/P04 smoke passes; P04 vertical slice, 131 Rust tests, Worker/WASM builds, hostile smoke, idempotency/health/policy extensions, authenticated desktop/narrow/editor captures, and handoffs pass; local downstream-disconnect delivery remains an explicit runtime follow-up |
 | P05 | complete | frozen: `p05-cg-v1` (`b5a5ea8`; CR-001/CR-002 accepted) | conditional PASS: `docs/implementation/gates/P05-IG.md` | PR #18 merged as `976a40b`; 185-check fresh-D1/Worker managed loop passes; generic privileged approval, accounting, hostile cases, timeline/audit, and hard-budget denial pass; public CUA/browser execution and passive cancellation remain explicit limitations |
-| P06 | implementation ready | frozen: `p06-cg-v1` (PR #22; CR-001/002/003 + ADR 0006) | pending | Contract Gate and fixture reviewed against control-plane, ZCode, FE, and contract audits; MOD/BE/FE/INT/QA packets unblocked; shared-file ownership assigned |
+| P06 | implementation ready | frozen: `p06-cg-v1` (`11341a5`, PR #22; CR-001/002/003 + ADR 0006) | pending | Contract Gate and fixture reviewed against control-plane, ZCode, FE, and contract audits; MOD/BE/FE/INT/QA packets unblocked; shared-file ownership assigned |
 | P07 | blocked | blocked | blocked | demand/dependency gated |
 | P08 | blocked | blocked | blocked | waits for integration foundations |
 | P09 | blocked | blocked | blocked | release hardening only |
@@ -158,7 +158,7 @@ P05 Contract Gate `p05-cg-v1` is frozen at `b5a5ea8`; no dependent packet may re
 | P06-INT-02 | ready | Licensing snapshot integration (existing `/devices/policy` authority) |
 | P06-QA-01 | blocked | Durable operations integration gate; unblocks when implementation packets merge |
 
-P06 Contract Gate `p06-cg-v1` is frozen in `docs/implementation/gates/P06-CG.md` with fixture `docs/implementation/fixtures/p06-contracts-v1.json`. Normative clarifications: `P06-CR-001` (lease fencing/`ambiguous`, calendar intervals, off-peak execution class), `P06-CR-002` (entitlement/license separation, internal-only overrides, provider projection), `P06-CR-003` (P02 deletion bridge, private R2 per ADR 0006). No implementation packet may silently redefine these contracts.
+P06 Contract Gate `p06-cg-v1` is frozen at `11341a5` in `docs/implementation/gates/P06-CG.md`, with fixture `docs/implementation/fixtures/p06-contracts-v1.json`. Normative clarifications: `P06-CR-001` (lease fencing/`ambiguous`, calendar intervals, off-peak execution class), `P06-CR-002` (entitlement/license separation, internal-only overrides, provider projection), `P06-CR-003` (P02 deletion bridge, private R2 per ADR 0006). No implementation packet may silently redefine these contracts.
 
 ## Rule
 

@@ -2,7 +2,7 @@
 
 ## Scope
 
-- P06 Contract Gate `p06-cg-v1` frozen in `docs/implementation/gates/P06-CG.md`.
+- P06 Contract Gate `p06-cg-v1` frozen at `11341a5` (PR #22) in `docs/implementation/gates/P06-CG.md`.
 - Contract fixture frozen at `docs/implementation/fixtures/p06-contracts-v1.json` and validated (ID formats, occurrence identity key, state enums, and the deterministic webhook HMAC test vector all check out).
 - Fourteen P06 work packets defined under `docs/implementation/packets/` with disjoint write surfaces and named shared-file ownership.
 - The gate was reviewed against five independent audits: control-plane reconnaissance, ZCode/LumiAgents reuse audit, web/frontend surface audit, and two contract-consistency reviews. All blocking findings are resolved in the gate, the three Change Requests, or ADR 0006.
