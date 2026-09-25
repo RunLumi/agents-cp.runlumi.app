@@ -814,3 +814,232 @@ function isDeliveryStatus(value: unknown): value is DeliveryStatus {
     value === "pending" || value === "queued" || value === "delivered" || value === "dead_letter"
   );
 }
+
+// ---------------------------------------------------------------------------
+// P03 — devices, projects, workspace bindings, policy snapshots
+// ---------------------------------------------------------------------------
+
+export interface ManagedDevice {
+  id: string;
+  org_id: string;
+  name: string;
+  platform: string;
+  app_version: string;
+  status: "active" | "revoked";
+  capabilities: Record<string, unknown> | null;
+  last_seen_at: string | null;
+  revoked_at: string | null;
+  enrolled_by_user_id: string;
+  created_at: string;
+}
+
+export interface Project {
+  id: string;
+  org_id: string;
+  name: string;
+  slug: string;
+  visibility: "org" | "restricted";
+  archived: boolean;
+  version: number;
+  created_by_user_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceBinding {
+  id: string;
+  org_id: string;
+  project_id: string;
+  device_id: string;
+  workspace_identity: string;
+  display_name: string;
+  environment_type: "local" | "ssh" | "wsl" | "docker" | "remote";
+  last_seen_at: string | null;
+  created_at: string;
+}
+
+export interface PolicySnapshot {
+  policy_id: string;
+  org_id: string;
+  policy_version: number;
+  issued_at: string;
+  expires_at: string;
+  signature: string | null;
+  payload: Record<string, unknown>;
+}
+
+function isManagedDevice(value: unknown): value is ManagedDevice {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.platform === "string" &&
+    typeof value.app_version === "string" &&
+    typeof value.status === "string" &&
+    typeof value.enrolled_by_user_id === "string" &&
+    typeof value.created_at === "string"
+  );
+}
+
+function isManagedDevicePage(value: unknown): value is Page<ManagedDevice> {
+  return isPage(value, isManagedDevice);
+}
+
+function isProject(value: unknown): value is Project {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.slug === "string" &&
+    typeof value.visibility === "string" &&
+    typeof value.archived === "boolean" &&
+    typeof value.version === "number" &&
+    typeof value.created_at === "string"
+  );
+}
+
+function isProjectPage(value: unknown): value is Page<Project> {
+  return isPage(value, isProject);
+}
+
+function isWorkspaceBinding(value: unknown): value is WorkspaceBinding {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.project_id === "string" &&
+    typeof value.device_id === "string" &&
+    typeof value.workspace_identity === "string" &&
+    typeof value.environment_type === "string"
+  );
+}
+
+function isWorkspaceBindingList(value: unknown): value is { items: WorkspaceBinding[] } {
+  return isObject(value) && Array.isArray(value.items) && value.items.every(isWorkspaceBinding);
+}
+
+function isPolicySnapshot(value: unknown): value is PolicySnapshot {
+  return (
+    isObject(value) &&
+    typeof value.policy_id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.policy_version === "number" &&
+    typeof value.issued_at === "string" &&
+    typeof value.expires_at === "string" &&
+    isObject(value.payload)
+  );
+}
+
+export async function listDevices(
+  orgId: string,
+  signal?: AbortSignal,
+): Promise<Page<ManagedDevice>> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/devices`,
+    signal ? { signal } : {},
+    isManagedDevicePage,
+  );
+}
+
+export async function approveDeviceEnrollment(
+  orgId: string,
+  enrollmentId: string,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<{ device: ManagedDevice; device_token: string; policy_version: number }> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/devices/enrollments/${encodeURIComponent(enrollmentId)}/approve`,
+    {
+      method: "POST",
+      body: {},
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isApproveEnrollmentResponse,
+  );
+}
+
+function isApproveEnrollmentResponse(value: unknown): value is {
+  device: ManagedDevice;
+  device_token: string;
+  policy_version: number;
+} {
+  return isObject(value) && isManagedDevice(value.device) && typeof value.device_token === "string";
+}
+
+export async function revokeDevice(
+  orgId: string,
+  deviceId: string,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/devices/${encodeURIComponent(deviceId)}`,
+    {
+      method: "DELETE",
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isEmptyResponse,
+  );
+}
+
+export async function listProjects(orgId: string, signal?: AbortSignal): Promise<Page<Project>> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/projects`,
+    signal ? { signal } : {},
+    isProjectPage,
+  );
+}
+
+export async function createProject(
+  orgId: string,
+  input: { name: string; visibility: "org" | "restricted"; slug?: string },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<Project> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/projects`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isProject,
+  );
+}
+
+export async function patchProject(
+  orgId: string,
+  projectId: string,
+  input: { name: string; visibility: "org" | "restricted"; archived?: boolean; version: number },
+  signal?: AbortSignal,
+): Promise<Project> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}`,
+    { method: "PATCH", body: input, ...(signal ? { signal } : {}) },
+    isProject,
+  );
+}
+
+export async function listProjectBindings(
+  orgId: string,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<{ items: WorkspaceBinding[] }> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projectId)}/bindings`,
+    signal ? { signal } : {},
+    isWorkspaceBindingList,
+  );
+}
+
+export async function getOrgPolicy(orgId: string, signal?: AbortSignal): Promise<PolicySnapshot> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/policy`,
+    signal ? { signal } : {},
+    isPolicySnapshot,
+  );
+}
