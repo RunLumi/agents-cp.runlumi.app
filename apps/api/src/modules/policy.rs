@@ -2,8 +2,8 @@
 //! snapshot for an organization (F19-004/FR-F19-005).
 //!
 //! P03 owns the envelope and the `org_access`, `projects`, and
-//! `min_client_version` sections. The `models`, `tools`, `automation`, and
-//! `entitlements` sections are typed extension points: opaque JSON objects
+//! `min_client_version` sections. The `models`, `tools`, `automation`,
+//! `entitlements`, `budgets`, and `rate_limits` sections are typed extension points: opaque JSON objects
 //! with a `schema_version` field that P04/P05 will own. Unknown sections are
 //! dropped, malformed placeholders fail compilation, and the payload is
 //! capped so a policy snapshot can never smuggle unbounded data.
@@ -16,7 +16,14 @@ pub const POLICY_PAYLOAD_MAX_LEN: usize = 65_536;
 pub const DEFAULT_POLICY_TTL_SECONDS: u32 = 24 * 60 * 60;
 
 /// Sections owned by later phases; P03 validates their shape only.
-pub const EXTENSION_SECTIONS: [&str; 4] = ["models", "tools", "automation", "entitlements"];
+pub const EXTENSION_SECTIONS: [&str; 6] = [
+    "models",
+    "tools",
+    "automation",
+    "entitlements",
+    "budgets",
+    "rate_limits",
+];
 
 /// Effective-policy inputs gathered by the caller from current state.
 #[derive(Clone, Debug, PartialEq)]
@@ -85,6 +92,8 @@ pub fn compile_policy_payload(
         "tools": sections["tools"],
         "automation": sections["automation"],
         "entitlements": sections["entitlements"],
+        "budgets": sections["budgets"],
+        "rate_limits": sections["rate_limits"],
     });
 
     if serde_json::to_string(&payload)

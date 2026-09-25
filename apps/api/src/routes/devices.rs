@@ -120,7 +120,7 @@ fn decode_page_cursor(raw: &str, context: &RequestContext) -> Result<(String, St
 /// Authenticate a device-side request from `Authorization: DeviceToken <hex>`.
 /// The token row is joined against the device row so an expired token and a
 /// revoked device are both rejected before any handler logic runs.
-async fn require_device(
+pub(crate) async fn require_device(
     state: &Arc<AppState>,
     headers: &HeaderMap,
     context: &RequestContext,

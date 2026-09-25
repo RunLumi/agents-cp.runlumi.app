@@ -1,6 +1,7 @@
 pub mod authenticators;
 pub mod authorization;
 pub mod budget;
+pub mod budget_p05;
 pub mod catalog;
 pub mod credentials;
 pub mod devices;
@@ -11,9 +12,14 @@ pub mod organizations;
 pub mod outbox;
 pub mod policy;
 pub mod policy_p04;
+pub mod policy_p05;
 pub mod projects;
+pub mod rate_limits;
 pub mod routing;
+pub mod runs;
 pub mod teams;
+pub mod tool_policy;
+pub mod usage;
 
 #[cfg(test)]
 mod p04_domain_tests;

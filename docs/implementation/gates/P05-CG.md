@@ -6,7 +6,7 @@
 - Contract version: `p05-cg-v1`
 - Inputs: Plan00, Plan05, F04, F07, F08, F10, F11, F12, F13, F16, F21, F23, ADR 0001–0005, P03-CG `p03-cg-v1`, P04-CG `p04-cg-v1`, P03-IG, and P04-IG
 - Preconditions: P03 and P04 stable handoffs are merged; P04 conditional local downstream-disconnect limitation remains an explicit runtime follow-up and is not redefined here
-- Additive clarification: `docs/implementation/change-requests/P05-CR-001.md`
+- Additive clarifications: `docs/implementation/change-requests/P05-CR-001.md`, `docs/implementation/change-requests/P05-CR-002.md`
 - Shared-file owner: P05 coordinator
 
 ## Purpose and scope
@@ -25,6 +25,22 @@ principal + device + project
 ```
 
 P05 does not move local desktop execution, shell, browser, computer-use, or MCP execution into the Worker. The desktop/runtime remains the execution host; the control plane is the policy, approval, accounting, and audit authority.
+
+## P05-CR-002 integration clarifications
+
+The additive clarifications in `docs/implementation/change-requests/P05-CR-002.md` are normative for implementation:
+
+- managed device run lifecycle and tool-result routes are part of the device API;
+- Run projections carry `version`, `state_version`, policy snapshot/version, workspace binding, cancel time, and resume lineage;
+- RunEvent envelopes carry org/project/request/device/agent-session correlation and use P01-compatible actor types;
+- approvals bind fingerprint, argument hash, policy version, and atomically consume per-use grants;
+- tool policy has typed rules and project scope;
+- browser clients cannot submit authoritative cost/reservation/reconciliation values; internal accounting operations are server-owned;
+- inference usage remains P04 request-scoped, while non-inference run usage uses the additive `run_usage_events` source;
+- dashboard summary/rollup/denial reads and audit run correlation are additive;
+- P03 policy transport gains versioned budget/rate sections through a coordinated compiler extension.
+
+Where the initial tables below describe a broader shape, P05-CR-002's narrower security and compatibility rules control.
 
 ## Domain vocabulary
 
@@ -359,6 +375,8 @@ All routes are under `/api/v1`, use the P01 error envelope and `X-Request-ID`, r
 
 `POST /runs` creates a queued/dispatching record and performs current policy, device, project, rate, and budget checks before eligible cloud dispatch. A local-only run may record state without a cloud budget reservation; it still receives a visible run/timeline and must not be represented as managed cloud inference.
 
+P05-CR-002 adds the device-token equivalents under `/api/v1/devices/sessions` and `/api/v1/devices/runs`, including start/complete/fail/cancel, event reads, and tool-call result/consumption. The device's token-derived organization and workspace binding are authoritative; no body field can replace them.
+
 ### Tool/policy/approval APIs
 
 | Method | Path | Permission/context | Request | Success |
@@ -383,13 +401,16 @@ The tool-decision endpoint is a broker boundary, not a client override. It evalu
 | Method | Path | Permission/context | Request | Success |
 |---|---|---|---|---|
 | GET | `/orgs/{org_id}/usage` | `usage.read` | `limit?,cursor?,project_id?,run_id?,from?,to?` | `200 Page<UsageEvent>` |
-| POST | `/orgs/{org_id}/usage/reconcile` | `usage.read` or internal service identity + Idempotency-Key | `{request_id|run_id,external_id?,actual_cost_minor?,provider_usage?}` | `200 {usage_event,cost_record}` |
+| GET | `/orgs/{org_id}/usage/summary` | `usage.read` | `project_id?,from?,to?` | `200 UsageSummary` |
+| GET | `/orgs/{org_id}/usage/rollups` | `usage.read` | `period=hour\|day\|month,from?,to?` | `200 Page<UsageRollup>` |
+| GET | `/orgs/{org_id}/usage/denials` | `usage.read` | `limit?,cursor?,from?,to?` | `200 Page<BudgetDenial>` |
+| POST | `/orgs/{org_id}/usage/reconcile` | internal service identity + Idempotency-Key (not browser) | `{request_id|run_id,external_id?,actual_cost_minor?,provider_usage?}` | `200 {usage_event,cost_record}` |
 | GET | `/orgs/{org_id}/budgets` | `budgets.read` | `limit?,cursor?,scope_type?,scope_id?` | `200 Page<Budget>` |
 | POST | `/orgs/{org_id}/budgets` | `budgets.manage` + Idempotency-Key | `{scope_type,scope_id?,period_start,period_end,limit_minor,currency,hard}` | `201 Budget` |
 | PATCH | `/orgs/{org_id}/budgets/{budget_id}` | `budgets.manage` + `version` | mutable limit/period/lifecycle fields | `200 Budget` |
 | GET | `/orgs/{org_id}/budgets/{budget_id}` | `budgets.read` + scope | — | `200 Budget` |
-| POST | `/orgs/{org_id}/budgets/{budget_id}/reservations` | `runs.start`/service identity + Idempotency-Key | `{request_id,run_id?,reserved_minor,expires_at}` | `201 BudgetReservation` |
-| POST | `/orgs/{org_id}/budgets/{budget_id}/reservations/{reservation_id}/reconcile` | internal/service identity + Idempotency-Key | `{actual_minor,status}` | `200 BudgetReservation` |
+| POST | `/orgs/{org_id}/budgets/{budget_id}/reservations` | internal inference-engine identity + Idempotency-Key (not browser) | `{request_id,run_id?,reserved_minor,expires_at}` | `201 BudgetReservation` |
+| POST | `/orgs/{org_id}/budgets/{budget_id}/reservations/{reservation_id}/reconcile` | internal/service identity + Idempotency-Key (not browser) | `{actual_minor,status}` | `200 BudgetReservation` |
 | GET | `/orgs/{org_id}/rate-limits` | `budgets.read` | — | `200 Page<RateLimitPolicy>` |
 | PUT | `/orgs/{org_id}/rate-limits/{scope_type}/{scope_id}` | `budgets.manage` + `version` | rate/concurrency policy | `200 RateLimitPolicy` |
 
