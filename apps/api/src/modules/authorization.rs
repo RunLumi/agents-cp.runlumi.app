@@ -122,6 +122,20 @@ pub enum Permission {
     RoutesManage,
     InferenceUse,
     UsageRead,
+    // P05-CG (p05-cg-v1): managed runs, tools, approvals, and budgets.
+    AgentsRead,
+    AgentsManage,
+    SessionsRead,
+    SessionsManage,
+    RunsRead,
+    RunsStart,
+    RunsCancel,
+    ToolsRead,
+    ToolsManage,
+    ApprovalsRead,
+    ApprovalsResolve,
+    BudgetsRead,
+    BudgetsManage,
     Unknown(String),
 }
 
@@ -150,6 +164,19 @@ impl Permission {
             "routes.manage" => Self::RoutesManage,
             "inference.use" => Self::InferenceUse,
             "usage.read" => Self::UsageRead,
+            "agents.read" => Self::AgentsRead,
+            "agents.manage" => Self::AgentsManage,
+            "sessions.read" => Self::SessionsRead,
+            "sessions.manage" => Self::SessionsManage,
+            "runs.read" => Self::RunsRead,
+            "runs.start" => Self::RunsStart,
+            "runs.cancel" => Self::RunsCancel,
+            "tools.read" => Self::ToolsRead,
+            "tools.manage" => Self::ToolsManage,
+            "approvals.read" => Self::ApprovalsRead,
+            "approvals.resolve" => Self::ApprovalsResolve,
+            "budgets.read" => Self::BudgetsRead,
+            "budgets.manage" => Self::BudgetsManage,
             _ => Self::Unknown(value.to_owned()),
         }
     }
@@ -178,6 +205,19 @@ impl Permission {
             Self::RoutesManage => "routes.manage",
             Self::InferenceUse => "inference.use",
             Self::UsageRead => "usage.read",
+            Self::AgentsRead => "agents.read",
+            Self::AgentsManage => "agents.manage",
+            Self::SessionsRead => "sessions.read",
+            Self::SessionsManage => "sessions.manage",
+            Self::RunsRead => "runs.read",
+            Self::RunsStart => "runs.start",
+            Self::RunsCancel => "runs.cancel",
+            Self::ToolsRead => "tools.read",
+            Self::ToolsManage => "tools.manage",
+            Self::ApprovalsRead => "approvals.read",
+            Self::ApprovalsResolve => "approvals.resolve",
+            Self::BudgetsRead => "budgets.read",
+            Self::BudgetsManage => "budgets.manage",
             Self::Unknown(value) => value,
         }
     }
@@ -194,6 +234,12 @@ impl Permission {
                 | Self::ModelsRead
                 | Self::RoutesRead
                 | Self::UsageRead
+                | Self::AgentsRead
+                | Self::SessionsRead
+                | Self::RunsRead
+                | Self::ToolsRead
+                | Self::ApprovalsRead
+                | Self::BudgetsRead
         )
     }
 }
@@ -393,6 +439,19 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::RoutesManage
                 | Permission::InferenceUse
                 | Permission::UsageRead
+                | Permission::AgentsRead
+                | Permission::AgentsManage
+                | Permission::SessionsRead
+                | Permission::SessionsManage
+                | Permission::RunsRead
+                | Permission::RunsStart
+                | Permission::RunsCancel
+                | Permission::ToolsRead
+                | Permission::ToolsManage
+                | Permission::ApprovalsRead
+                | Permission::ApprovalsResolve
+                | Permission::BudgetsRead
+                | Permission::BudgetsManage
         ),
         MembershipRole::Member => matches!(
             permission,
@@ -406,6 +465,15 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::RoutesRead
                 | Permission::InferenceUse
                 | Permission::UsageRead
+                | Permission::AgentsRead
+                | Permission::SessionsRead
+                | Permission::SessionsManage
+                | Permission::RunsRead
+                | Permission::RunsStart
+                | Permission::RunsCancel
+                | Permission::ToolsRead
+                | Permission::ApprovalsRead
+                | Permission::BudgetsRead
         ),
         MembershipRole::Viewer => matches!(
             permission,
@@ -418,6 +486,13 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::ProjectsRead
                 | Permission::ModelsRead
                 | Permission::RoutesRead
+                | Permission::UsageRead
+                | Permission::AgentsRead
+                | Permission::SessionsRead
+                | Permission::RunsRead
+                | Permission::ToolsRead
+                | Permission::ApprovalsRead
+                | Permission::BudgetsRead
         ),
     }
 }
@@ -628,6 +703,61 @@ mod tests {
                 Some(&resource)
             ),
             AuthorizationDecision::Deny(DenyReason::ResourceScopeMismatch)
+        );
+    }
+
+    #[test]
+    fn p05_roles_keep_managed_control_permissions_separate() {
+        let (user, org, user_id, membership_id) = principal(true);
+        let organization = OrganizationContext {
+            organization_id: org.clone(),
+            state: OrganizationState::Active,
+            version: 1,
+        };
+
+        let member = make_membership(
+            org.clone(),
+            user_id.clone(),
+            membership_id.clone(),
+            MembershipRole::Member,
+        );
+        assert!(authorize(
+            Some(&user),
+            &organization,
+            Some(&member),
+            &Permission::RunsStart,
+            None
+        )
+        .is_allowed());
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&member),
+                &Permission::ToolsManage,
+                None
+            ),
+            AuthorizationDecision::Deny(DenyReason::PermissionDenied)
+        );
+
+        let viewer = make_membership(org, user_id, membership_id, MembershipRole::Viewer);
+        assert!(authorize(
+            Some(&user),
+            &organization,
+            Some(&viewer),
+            &Permission::RunsRead,
+            None
+        )
+        .is_allowed());
+        assert_eq!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&viewer),
+                &Permission::RunsStart,
+                None
+            ),
+            AuthorizationDecision::Deny(DenyReason::PermissionDenied)
         );
     }
 }

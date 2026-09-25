@@ -21,12 +21,14 @@ pub use idempotency::{
     RequestFingerprint, StoredSuccess,
 };
 pub use identifiers::{
-    ActorId, BudgetId, BudgetReservationId, CorrelationId, CredentialId, DeviceAuthorizationId,
-    DeviceEnrollmentId, DeviceId, EventId, IdentityId, InvitationId, ManagedDeviceId, MembershipId,
-    ModelAliasId, ModelId, OrganizationId, PolicyAckId, PolicySnapshotId, ProjectId,
-    ProviderEndpointId, ProviderId, ReauthenticationGrantId, RequestId, ResourceId, RouteId,
-    RouteVersionId, SecurityEventId, SessionId, TeamId, TeamMemberId, UsageEventId, UserId,
-    WorkspaceBindingId,
+    ActorId, AgentDefinitionId, AgentSessionId, ApprovalId, ArtifactRefId, BudgetId,
+    BudgetReservationId, CapabilityId, CorrelationId, CostRecordId, CredentialId,
+    DeviceAuthorizationId, DeviceEnrollmentId, DeviceId, EventId, IdentityId, InvitationId,
+    ManagedDeviceId, McpRegistrationId, MembershipId, ModelAliasId, ModelId, OrganizationId,
+    PolicyAckId, PolicySnapshotId, ProjectId, ProviderEndpointId, ProviderId, RateLimitPolicyId,
+    ReauthenticationGrantId, RequestId, ResourceId, RouteId, RouteVersionId, RunEventId, RunId,
+    SecurityEventId, SessionId, TeamId, TeamMemberId, ToolCallId, ToolId, ToolPolicyId,
+    UsageEventId, UsageRollupId, UserId, WorkspaceBindingId,
 };
 pub use pagination::{Cursor, Page};
 pub use principal::Principal;

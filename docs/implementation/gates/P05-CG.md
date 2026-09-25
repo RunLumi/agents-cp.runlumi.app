@@ -6,6 +6,7 @@
 - Contract version: `p05-cg-v1`
 - Inputs: Plan00, Plan05, F04, F07, F08, F10, F11, F12, F13, F16, F21, F23, ADR 0001–0005, P03-CG `p03-cg-v1`, P04-CG `p04-cg-v1`, P03-IG, and P04-IG
 - Preconditions: P03 and P04 stable handoffs are merged; P04 conditional local downstream-disconnect limitation remains an explicit runtime follow-up and is not redefined here
+- Additive clarification: `docs/implementation/change-requests/P05-CR-001.md`
 - Shared-file owner: P05 coordinator
 
 ## Purpose and scope
@@ -164,7 +165,7 @@ A hard budget is checked and reserved before eligible cloud dispatch. If authori
   "instructions_ref": "local://agent/instructions/v1",
   "default_model_alias": "coding-default",
   "required_capabilities": ["text", "tools"],
-  "allowed_tool_ids": ["tool_readonly_repo"],
+  "allowed_tool_ids": ["tool_0123456789abcdef0123456789abcdef"],
   "runtime_requirements": ["filesystem_read"],
   "lifecycle": "active",
   "version": 1,
@@ -308,7 +309,7 @@ Malformed or unsupported schema versions fail closed for managed tool execution.
   "project_id": "prj_0123456789abcdef0123456789abcdef",
   "run_id": "run_0123456789abcdef0123456789abcdef",
   "tool_call_id": "tcl_0123456789abcdef0123456789abcdef",
-  "tool_id": "tool_browser_submit",
+  "tool_id": "tool_0123456789abcdef0123456789abcdef",
   "risk_class": "external_side_effect",
   "approval_mode": "per_use",
   "status": "pending",
