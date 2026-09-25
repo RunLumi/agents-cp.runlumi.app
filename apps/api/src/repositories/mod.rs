@@ -5,7 +5,9 @@
 //! layer.
 
 mod ai;
+mod audit;
 mod authenticators;
+mod budgets;
 mod device;
 mod devices;
 mod idempotency;
@@ -14,15 +16,20 @@ mod organizations;
 mod outbox;
 mod policy;
 mod projects;
+mod runs;
 mod security;
+mod tools;
+mod usage;
 
 pub use ai::{
     AiRepository, AliasRecord, CredentialRecord, HealthRecord, InferenceRequestRecord, ModelRecord,
     PolicyRecord, ProviderRecord, RouteRecord, RouteVersionRecord, UsageRecord,
 };
+pub use audit::*;
 pub use authenticators::{
     AuthenticatorRepository, CeremonyRecord, PasskeyRecord, PasswordRecord, RecoveryRecord,
 };
+pub use budgets::*;
 pub use device::{DeviceAuthorizationRecord, DeviceAuthorizationRepository};
 pub use devices::{
     DeviceEnrollmentInput, DeviceEnrollmentRecord, DeviceRecord, DeviceRepository,
@@ -42,4 +49,7 @@ pub use projects::{
     NewProjectInput, ProjectGrantRecord, ProjectRecord, ProjectRepository, ProjectUpdateInput,
     WorkspaceBindingRecord,
 };
+pub use runs::*;
 pub use security::{SecurityEventInput, SecurityEventRecord, SecurityEventRepository};
+pub use tools::*;
+pub use usage::*;

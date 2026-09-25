@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     Router, middleware,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
 };
 use worker::{Env, Queue, SendEmail};
 
@@ -13,8 +13,9 @@ use crate::{
     adapters::d1::D1Adapter,
     http::{json_body_limit, request_boundary},
     routes::{
-        account, ai_catalog, auth, authenticators, device_auth, devices, foundation_checks,
-        health::health, inference, meta::meta, organizations, projects,
+        account, agents, ai_catalog, approvals, audit, auth, authenticators, budgets, device_auth,
+        device_runs, devices, foundation_checks, health::health, inference, meta::meta,
+        organizations, projects, runs, tools, usage,
     },
 };
 
@@ -229,7 +230,7 @@ pub fn router(env: Env) -> Router {
             "/api/v1/orgs/{org_id}/teams/{team_id}/members/{member_id}",
             delete(organizations::remove_team_member),
         )
-        .route("/api/v1/orgs/{org_id}/audit", get(organizations::audit))
+        .route("/api/v1/orgs/{org_id}/audit", get(audit::audit))
         .route(
             "/api/v1/orgs/{org_id}/policy",
             get(projects::org_policy).put(ai_catalog::update_policy),
@@ -267,6 +268,35 @@ pub fn router(env: Env) -> Router {
         .route(
             "/api/v1/devices/bindings/{binding_id}",
             delete(devices::delete_device_binding),
+        )
+        .route(
+            "/api/v1/devices/sessions",
+            post(device_runs::create_session),
+        )
+        .route(
+            "/api/v1/devices/sessions/{agent_session_id}/runs",
+            post(device_runs::create_run),
+        )
+        .route("/api/v1/devices/runs/{run_id}", get(device_runs::get_run))
+        .route(
+            "/api/v1/devices/runs/{run_id}/events",
+            get(device_runs::list_events),
+        )
+        .route(
+            "/api/v1/devices/runs/{run_id}/start",
+            post(device_runs::start_run),
+        )
+        .route(
+            "/api/v1/devices/runs/{run_id}/complete",
+            post(device_runs::complete_run),
+        )
+        .route(
+            "/api/v1/devices/runs/{run_id}/fail",
+            post(device_runs::fail_run),
+        )
+        .route(
+            "/api/v1/devices/runs/{run_id}/cancel",
+            post(device_runs::cancel_run),
         )
         .route(
             "/api/v1/orgs/{org_id}/projects",
@@ -341,7 +371,125 @@ pub fn router(env: Env) -> Router {
             "/api/v1/orgs/{org_id}/routes/{route_id}",
             patch(ai_catalog::update_route_lifecycle),
         )
-        .route("/api/v1/orgs/{org_id}/usage", get(ai_catalog::usage))
+        .route(
+            "/api/v1/orgs/{org_id}/agents",
+            get(agents::list_agents).post(agents::create_agent),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/agents/{agent_id}",
+            get(agents::get_agent).patch(agents::patch_agent),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/sessions",
+            get(agents::list_sessions).post(agents::create_session),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/sessions/{session_id}",
+            get(agents::get_session),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/sessions/{session_id}/close",
+            post(agents::close_session),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/runs",
+            get(runs::list_runs).post(runs::start_run),
+        )
+        .route("/api/v1/orgs/{org_id}/runs/{run_id}", get(runs::get_run))
+        .route(
+            "/api/v1/orgs/{org_id}/runs/{run_id}/cancel",
+            post(runs::cancel_run),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/runs/{run_id}/retry",
+            post(runs::retry_run),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/runs/{run_id}/events",
+            get(runs::list_run_events),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/runs/{run_id}/artifacts",
+            get(runs::list_artifacts).post(runs::create_artifact),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/tools",
+            get(tools::list_tools).post(tools::create_tool),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/tools/{tool_id}",
+            patch(tools::update_tool),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/mcp",
+            get(tools::list_mcp).post(tools::create_mcp),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/mcp/{mcp_id}",
+            patch(tools::update_mcp),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/policy/tools",
+            get(tools::get_tool_policy).put(tools::put_tool_policy),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/approvals",
+            get(approvals::list_approvals),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/approvals/{approval_id}",
+            get(approvals::get_approval),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/approvals/{approval_id}/resolve",
+            post(approvals::resolve_approval),
+        )
+        .route("/api/v1/orgs/{org_id}/usage", get(usage::list_usage))
+        .route(
+            "/api/v1/orgs/{org_id}/usage/summary",
+            get(usage::usage_summary),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/usage/rollups",
+            get(usage::usage_rollups),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/usage/denials",
+            get(usage::usage_denials),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/budgets",
+            get(budgets::list_budgets).post(budgets::create_budget),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/budgets/{budget_id}",
+            get(budgets::get_budget).patch(budgets::update_budget),
+        )
+        .route(budgets::RATE_LIMITS_PATH, get(budgets::list_rate_limits))
+        .route(
+            "/api/v1/orgs/{org_id}/rate-limits/{scope_type}/{scope_id}",
+            put(budgets::update_rate_limit),
+        )
+        .route(
+            "/api/v1/devices/{org_id}/budgets/{budget_id}/reservations",
+            post(budgets::create_reservation),
+        )
+        .route(
+            "/api/v1/devices/{org_id}/budgets/{budget_id}/reservations/{reservation_id}/reconcile",
+            post(budgets::reconcile_reservation),
+        )
+        .route(
+            "/api/v1/devices/{org_id}/usage/reconcile",
+            post(usage::reconcile_usage),
+        )
+        .route(
+            "/api/v1/runs/{run_id}/tool-decisions",
+            post(tools::create_tool_decision),
+        )
+        .route(
+            "/api/v1/devices/runs/{run_id}/tool-calls/{tool_call_id}/result",
+            post(tools::record_tool_result),
+        )
         .route("/api/v1/inference/models", get(inference::models))
         .route("/api/v1/inference/routes/{alias}", get(inference::route))
         .route("/api/v1/inference/responses", post(inference::responses))

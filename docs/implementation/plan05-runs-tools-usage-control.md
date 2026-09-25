@@ -1,6 +1,6 @@
 # Plan 05 — Runs, sessions, tool policy, usage, budgets
 
-Status: Planned
+Status: Review — Contract Gate `p05-cg-v1` frozen at `b5a5ea8`; implementation, external integration, and the fresh-D1 managed control-loop smoke are complete. P05 Integration Gate is a conditional PASS; public CUA/browser execution and passive cancellation remain explicit limitations.
 Specs: F08, F12, F13, F16, F21
 Depends on: P03, P04
 
@@ -227,3 +227,24 @@ Demonstrate:
 ## 9. Exit criteria
 
 The system can now safely manage a real team using Lumi Agents for controlled AI work.
+
+## 10. Completion evidence and follow-ups
+
+Coordinator evidence is recorded in `docs/implementation/gates/P05-IG.md`
+and `docs/implementation/evidence/P05-IG-2026-09-25.md`. The fresh-D1/Worker
+smoke passes 185 checks with zero required failures. It proves managed device
+run identity, queued → dispatching → running lifecycle, managed mock
+inference, D1 reservation/usage correlation, generic privileged approval and
+result/replay, MCP expansion denial, stale-policy denial, hard-budget denial,
+retry/cancel, cross-tenant/device negatives, timeline, audit, and request/run
+correlation.
+
+The gate is deliberately conditional rather than claiming unavailable host
+execution: the public CUA package is an API-compatible placeholder, no Worker
+browser/computer execution route exists, the capability catalog has no public
+write route, and local workerd did not persist a `request_cancelled` row for
+the passive-disconnect probe. Accounting uses a bounded token estimate for the
+pre-reservation and appends authoritative actual cost during reconciliation;
+a future hardening packet may add priced conversion and atomic rate counters.
+These limitations are recorded, tested where possible, and do not weaken the
+server-side fail-closed controls.

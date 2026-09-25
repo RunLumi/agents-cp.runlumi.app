@@ -3,13 +3,16 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::{
-    adapters::{d1::D1Adapter, new_event_id},
+    adapters::{
+        d1::{BindValue, D1Adapter},
+        new_event_id,
+    },
     app::AppState,
     core::{
         ActorContext, ActorId, ApiError, ApiErrorCode, EventEnvelope, EventType, OrganizationId,
         Principal, RequestContext,
     },
-    repositories::{OutboxRepository, SecurityEventInput, SecurityEventRepository, UserRecord},
+    repositories::{OutboxRepository, UserRecord},
     routes::errors,
 };
 
@@ -137,9 +140,83 @@ pub fn outbox_statement(
         })
 }
 
-/// Build an immutable security-event insert for a P04 mutation. The helper
+/// Build an immutable security-event insert for a mutation. The helper
 /// intentionally accepts only bounded metadata and never serializes a request
-/// body, credential, prompt, or response.
+/// body, credential, prompt, or response. P05 callers may add device/run
+/// correlation without changing the P01-P04 call sites.
+#[allow(clippy::too_many_arguments)]
+pub fn security_event_statement_with_context<'a>(
+    database: &'a D1Adapter,
+    context: &RequestContext,
+    principal: Option<&Principal>,
+    organization_id: Option<&'a str>,
+    event_id: &'a str,
+    action: &'a str,
+    resource_type: &'a str,
+    resource_id: Option<&'a str>,
+    outcome: &'a str,
+    metadata: &serde_json::Value,
+    device_id: Option<&'a str>,
+    run_id: Option<&'a str>,
+    agent_session_id: Option<&'a str>,
+    tool_call_id: Option<&'a str>,
+) -> Result<worker::d1::D1PreparedStatement, ApiError> {
+    let metadata = serde_json::to_string(metadata).map_err(|_| {
+        errors::api_error(
+            context,
+            ApiErrorCode::InternalError,
+            "The security event metadata is invalid.",
+        )
+    })?;
+    let organization_id = organization_id.map_or(BindValue::Null, BindValue::Text);
+    let actor_id = principal
+        .map(|value| BindValue::Text(value.user_id.as_str()))
+        .unwrap_or(BindValue::Null);
+    let effective_user_id = principal
+        .map(|value| BindValue::Text(value.user_id.as_str()))
+        .unwrap_or(BindValue::Null);
+    let session_id = principal
+        .map(|value| BindValue::Text(value.session_id.as_str()))
+        .unwrap_or(BindValue::Null);
+    let device_id = device_id.map_or(BindValue::Null, BindValue::Text);
+    let resource_id = resource_id.map_or(BindValue::Null, BindValue::Text);
+    let run_id = run_id.map_or(BindValue::Null, BindValue::Text);
+    let agent_session_id = agent_session_id.map_or(BindValue::Null, BindValue::Text);
+    let tool_call_id = tool_call_id.map_or(BindValue::Null, BindValue::Text);
+    database
+        .prepare(
+            "INSERT INTO security_events (event_id, org_id, actor_type, actor_id, effective_user_id, session_id, device_id, run_id, agent_session_id, tool_call_id, action, resource_type, resource_id, outcome, reason, metadata_json, request_id, correlation_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL, ?15, ?16, ?17, ?18)",
+            &[
+                BindValue::Text(event_id),
+                organization_id,
+                BindValue::Text(if principal.is_some() { "user" } else { "system" }),
+                actor_id,
+                effective_user_id,
+                session_id,
+                device_id,
+                run_id,
+                agent_session_id,
+                tool_call_id,
+                BindValue::Text(action),
+                BindValue::Text(resource_type),
+                resource_id,
+                BindValue::Text(outcome),
+                BindValue::Text(&metadata),
+                BindValue::Text(context.request_id.as_str()),
+                BindValue::Text(context.correlation_id.as_str()),
+                BindValue::Text(context.received_at.as_str()),
+            ],
+        )
+        .map_err(|_| {
+            errors::api_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "The security event store is unavailable.",
+            )
+        })
+}
+
+/// Build an immutable security-event insert for a P01-P04 mutation.
 #[allow(clippy::too_many_arguments)]
 pub fn security_event_statement<'a>(
     database: &'a D1Adapter,
@@ -153,37 +230,22 @@ pub fn security_event_statement<'a>(
     outcome: &'a str,
     metadata: &serde_json::Value,
 ) -> Result<worker::d1::D1PreparedStatement, ApiError> {
-    let input = SecurityEventInput {
-        event_id,
+    security_event_statement_with_context(
+        database,
+        context,
+        principal,
         organization_id,
-        actor_type: if principal.is_some() {
-            "user"
-        } else {
-            "system"
-        },
-        actor_id: principal.map(|value| value.user_id.as_str()),
-        effective_user_id: principal.map(|value| value.user_id.as_str()),
-        session_id: principal.map(|value| value.session_id.as_str()),
-        device_id: None,
+        event_id,
         action,
         resource_type,
         resource_id,
         outcome,
-        reason: None,
         metadata,
-        request_id: context.request_id.as_str(),
-        correlation_id: context.correlation_id.as_str(),
-        created_at: &context.received_at,
-    };
-    SecurityEventRepository::new(database)
-        .insert_statement(&input)
-        .map_err(|_| {
-            errors::api_error(
-                context,
-                ApiErrorCode::ServiceUnavailable,
-                "The security event store is unavailable.",
-            )
-        })
+        None,
+        None,
+        None,
+        None,
+    )
 }
 
 pub fn domain_error(

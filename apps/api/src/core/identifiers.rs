@@ -165,6 +165,21 @@ resource_id_type!(RouteVersionId, InvalidResourceId, Some("rtv"));
 resource_id_type!(UsageEventId, InvalidResourceId, Some("use"));
 resource_id_type!(BudgetId, InvalidResourceId, Some("bud"));
 resource_id_type!(BudgetReservationId, InvalidResourceId, Some("bres"));
+// P05-CG (p05-cg-v1) managed run, tool, approval, and accounting IDs.
+resource_id_type!(AgentDefinitionId, InvalidResourceId, Some("agd"));
+resource_id_type!(AgentSessionId, InvalidResourceId, Some("rse"));
+resource_id_type!(RunId, InvalidResourceId, Some("run"));
+resource_id_type!(RunEventId, InvalidResourceId, Some("rev"));
+resource_id_type!(ArtifactRefId, InvalidResourceId, Some("art"));
+resource_id_type!(ToolCallId, InvalidResourceId, Some("tcl"));
+resource_id_type!(McpRegistrationId, InvalidResourceId, Some("mcp"));
+resource_id_type!(ApprovalId, InvalidResourceId, Some("apr"));
+resource_id_type!(CapabilityId, InvalidResourceId, Some("cap"));
+resource_id_type!(ToolId, InvalidResourceId, Some("tool"));
+resource_id_type!(ToolPolicyId, InvalidResourceId, Some("tpol"));
+resource_id_type!(CostRecordId, InvalidResourceId, Some("cost"));
+resource_id_type!(RateLimitPolicyId, InvalidResourceId, Some("rlp"));
+resource_id_type!(UsageRollupId, InvalidResourceId, Some("url"));
 
 /// Opaque actor/principal identifier supplied only by trusted identity context.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
@@ -307,6 +322,17 @@ mod tests {
                 .as_str(),
             "req_0123456789abcdef0123456789abcdef"
         );
+    }
+
+    #[test]
+    fn p05_resource_ids_keep_their_domain_prefixes() {
+        assert!(AgentDefinitionId::new("agd_0123456789abcdef0123456789abcdef").is_ok());
+        assert!(AgentSessionId::new("rse_0123456789abcdef0123456789abcdef").is_ok());
+        assert!(RunId::new("run_0123456789abcdef0123456789abcdef").is_ok());
+        assert!(RunEventId::new("rev_0123456789abcdef0123456789abcdef").is_ok());
+        assert!(ApprovalId::new("apr_0123456789abcdef0123456789abcdef").is_ok());
+        assert!(ToolId::new("tool_0123456789abcdef0123456789abcdef").is_ok());
+        assert!(RunId::new("rse_0123456789abcdef0123456789abcdef").is_err());
     }
 
     #[test]

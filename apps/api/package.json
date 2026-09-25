@@ -11,7 +11,8 @@
     "smoke:local": "node scripts/smoke-local.mjs",
     "smoke:p02": "node scripts/p02-smoke.mjs",
     "smoke:p03": "node scripts/p03-smoke.mjs",
-    "smoke:p04": "node scripts/p04-smoke.mjs"
+    "smoke:p04": "node scripts/p04-smoke.mjs",
+    "smoke:p05": "node scripts/p05-smoke.mjs"
   },
   "devDependencies": {
     "wrangler": "4.137.0"

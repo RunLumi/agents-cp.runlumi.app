@@ -3034,6 +3034,7 @@ fn route_version_json(
     )
 }
 
+#[allow(dead_code)]
 fn usage_json(usage: &crate::repositories::UsageRecord) -> Result<Value, ApiError> {
     let provider_usage =
         serde_json::from_str::<Value>(&usage.provider_usage_json).unwrap_or_else(|_| json!({}));

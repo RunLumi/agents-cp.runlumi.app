@@ -15,6 +15,65 @@ use crate::{
     routes::{errors, support::database},
 };
 
+pub struct DeviceAccess {
+    pub device: crate::repositories::DeviceRecord,
+    #[allow(dead_code)]
+    pub organization: OrganizationRecord,
+    #[allow(dead_code)]
+    pub membership: MembershipRecord,
+}
+
+/// Resolve a device-token request to one active organization and the current
+/// membership of the user who enrolled the device. Device identity is never
+/// accepted from a body or path; the token lookup supplies its scope.
+pub(crate) async fn authorize_device(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    context: &RequestContext,
+) -> Result<DeviceAccess, ApiError> {
+    let device = crate::routes::devices::require_device(state, headers, context).await?;
+    let database = database(state, context)?;
+    let repository = OrganizationRepository::new(database);
+    let organization = repository
+        .find_organization(&device.org_id)
+        .await
+        .map_err(|_| service_unavailable(context))?
+        .ok_or_else(|| inaccessible(context))?;
+    let membership = repository
+        .find_membership(&device.org_id, &device.enrolled_by_user_id)
+        .await
+        .map_err(|_| service_unavailable(context))?
+        .ok_or_else(|| {
+            errors::api_error(
+                context,
+                ApiErrorCode::PermissionDenied,
+                "The device is no longer approved for this organization.",
+            )
+            .with_detail("reason", json!("device_not_approved"))
+        })?;
+    if membership.status != "active" {
+        return Err(errors::api_error(
+            context,
+            ApiErrorCode::PermissionDenied,
+            "The device is no longer approved for this organization.",
+        )
+        .with_detail("reason", json!("device_not_approved")));
+    }
+    if organization.state != "active" {
+        return Err(errors::api_error(
+            context,
+            ApiErrorCode::PermissionDenied,
+            "The organization is not active.",
+        )
+        .with_detail("reason", json!("organization_not_active")));
+    }
+    Ok(DeviceAccess {
+        device,
+        organization,
+        membership,
+    })
+}
+
 pub struct OrgAccess {
     pub principal: Principal,
     pub organization: OrganizationRecord,

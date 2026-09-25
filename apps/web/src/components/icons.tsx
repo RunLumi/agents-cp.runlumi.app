@@ -96,6 +96,34 @@ export function IconRoute(props: IconProps) {
   );
 }
 
+export function IconRun(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <path d="M10 8l6 4-6 4z" />
+    </IconBase>
+  );
+}
+
+export function IconToolShield(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M14.7 6.3a4 4 0 0 0-5.1 5.1L4 17v3h3l5.6-5.6a4 4 0 0 0 5.1-5.1l-2.5 2.5-2.1-.5-.5-2.1z" />
+      <path d="M17 4l3 3-2 2-3-3z" />
+    </IconBase>
+  );
+}
+
+export function IconCoins(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <ellipse cx="12" cy="6" rx="7" ry="3" />
+      <path d="M5 6v5c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
+      <path d="M5 11v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5" />
+    </IconBase>
+  );
+}
+
 export function IconX(props: IconProps) {
   return (
     <IconBase {...props}>

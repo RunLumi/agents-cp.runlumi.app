@@ -353,6 +353,10 @@ export interface ModelAliasView {
 }
 
 type Decoder<T> = (value: unknown) => value is T;
+interface NormalizedDecoder<T> {
+  decode(value: unknown): T | undefined;
+}
+type ResponseDecoder<T> = Decoder<T> | NormalizedDecoder<T>;
 type JsonObject = Record<string, unknown>;
 
 const INTERNAL_FOUNDATION_CHECKS = "/api/v1/_internal/foundation-checks";
@@ -1167,18 +1171,18 @@ export async function listInferenceModels(
 async function requestJson<T>(
   path: string,
   options: RequestOptions,
-  decode: Decoder<T>,
+  decode: ResponseDecoder<T>,
 ): Promise<T> {
   const method = (options.method ?? "GET").toUpperCase();
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
   if (options.body !== undefined) headers.set("Content-Type", "application/json");
   if (options.idempotencyKey) headers.set("Idempotency-Key", options.idempotencyKey);
-  if (!isSafeMethod(method)) {
+  if (!isSafeMethod(method) && !options.skipCsrf) {
     const csrf = readCookie("lumi_csrf");
     if (csrf) headers.set("X-CSRF-Token", csrf);
   }
-  const { body, idempotencyKey: _idempotencyKey, ...requestInit } = options;
+  const { body, idempotencyKey: _idempotencyKey, skipCsrf: _skipCsrf, ...requestInit } = options;
   const init: RequestInit = {
     ...requestInit,
     method,
@@ -1225,17 +1229,25 @@ async function requestJson<T>(
       isRetryableStatus(response.status, apiCode, retrySafe),
     );
   }
-  if (!validJson || !decode(payload)) {
-    if (response.status === 204) return undefined as T;
+  if (response.status === 204) return undefined as T;
+  const decoded = validJson ? decodeResponse(payload, decode) : undefined;
+  if (decoded === undefined) {
     throw makeInvalidResponseError({ requestId, status: response.status });
   }
-  return payload;
+  return decoded;
+}
+
+function decodeResponse<T>(value: unknown, decoder: ResponseDecoder<T>): T | undefined {
+  if (typeof decoder === "function") return decoder(value) ? value : undefined;
+  return decoder.decode(value);
 }
 
 interface RequestOptions extends Omit<RequestInit, "body" | "method"> {
   method?: string;
   body?: unknown;
   idempotencyKey?: string;
+  /** Device/service routes authenticate with their own bearer boundary. */
+  skipCsrf?: boolean;
 }
 
 function isSafeMethod(method: string): boolean {
@@ -2061,4 +2073,2348 @@ export async function getOrgPolicy(orgId: string, signal?: AbortSignal): Promise
     signal ? { signal } : {},
     isPolicySnapshot,
   );
+}
+
+// ---------------------------------------------------------------------------
+// P05 — agents, agent sessions, runs, timelines, and artifact references
+// ---------------------------------------------------------------------------
+
+export type AgentDefinitionLifecycle = "active" | "archived" | "disabled";
+export type AgentSessionLifecycle = "active" | "closed" | "archived";
+
+export const RUN_STATES = [
+  "queued",
+  "dispatching",
+  "running",
+  "waiting_user",
+  "waiting_approval",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "timed_out",
+] as const;
+
+export type RunState = (typeof RUN_STATES)[number];
+export type P05RunState = RunState;
+
+export interface AgentDefinition {
+  id: string;
+  org_id: string;
+  project_id: string | null;
+  name: string;
+  description: string | null;
+  instructions_ref: string | null;
+  default_model_alias: string | null;
+  required_capabilities: string[];
+  allowed_tool_ids: string[];
+  runtime_requirements: string[];
+  lifecycle: AgentDefinitionLifecycle;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AgentDefinitionRecord = AgentDefinition;
+
+export interface CreateAgentInput {
+  name: string;
+  description?: string | null;
+  instructions_ref?: string | null;
+  default_model_alias?: string | null;
+  required_capabilities?: string[];
+  allowed_tool_ids?: string[];
+  runtime_requirements?: string[];
+  project_id?: string | null;
+}
+
+export interface UpdateAgentInput {
+  name?: string;
+  description?: string | null;
+  instructions_ref?: string | null;
+  default_model_alias?: string | null;
+  required_capabilities?: string[];
+  allowed_tool_ids?: string[];
+  runtime_requirements?: string[];
+  project_id?: string | null;
+  lifecycle?: AgentDefinitionLifecycle;
+  version: number;
+}
+
+export type CreateAgentRequest = CreateAgentInput;
+export type UpdateAgentRequest = UpdateAgentInput;
+
+export interface ListAgentsQuery {
+  limit?: number;
+  cursor?: string;
+  project_id?: string;
+}
+
+export interface AgentSession {
+  id: string;
+  org_id: string;
+  project_id: string;
+  device_id: string;
+  workspace_binding_id: string | null;
+  agent_definition_id: string;
+  agent_definition_version: number;
+  external_id: string | null;
+  title: string | null;
+  lifecycle: AgentSessionLifecycle;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type Session = AgentSession;
+export type AgentSessionRecord = AgentSession;
+
+export interface CreateAgentSessionInput {
+  project_id: string;
+  device_id: string;
+  workspace_binding_id?: string | null;
+  agent_definition_id: string;
+  agent_definition_version?: number;
+  external_id?: string | null;
+  title?: string | null;
+}
+
+export type CreateSessionRequest = CreateAgentSessionInput;
+export type CreateAgentSessionRequest = CreateAgentSessionInput;
+
+export interface ListAgentSessionsQuery {
+  limit?: number;
+  cursor?: string;
+  project_id?: string;
+  lifecycle?: AgentSessionLifecycle;
+}
+
+export interface Run {
+  id: string;
+  org_id: string;
+  project_id: string;
+  agent_session_id: string;
+  parent_run_id: string | null;
+  attempt: number;
+  agent_definition_id: string;
+  agent_definition_version: number;
+  principal_user_id: string;
+  device_id: string;
+  model_alias: string | null;
+  route_id: string | null;
+  route_version_id: string | null;
+  state: RunState;
+  failure_code: string | null;
+  request_id: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  version: number;
+  state_version?: number | null;
+  workspace_binding_id?: string | null;
+  policy_snapshot_id?: string | null;
+  policy_version?: number | null;
+  cancel_requested_at?: string | null;
+  resumed_from_run_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type RunRecord = Run;
+
+export interface StartRunInput {
+  agent_session_id: string;
+  model_alias?: string;
+  input_ref?: string;
+  parent_run_id?: string;
+  execution_mode?: "managed" | "local_only";
+}
+
+export type StartRunRequest = StartRunInput;
+export type CreateRunInput = StartRunInput;
+
+export interface CancelRunInput {
+  version: number;
+  reason?: string;
+}
+
+export interface RetryRunInput {
+  version: number;
+}
+
+export interface ListRunsQuery {
+  limit?: number;
+  cursor?: string;
+  project_id?: string;
+  session_id?: string;
+  state?: RunState;
+}
+
+export type P05Metadata = Record<string, unknown>;
+
+export interface RunEvent {
+  id: string;
+  run_id: string;
+  sequence: number;
+  event_type: string;
+  occurred_at: string;
+  actor_type: "user" | "device" | "service_account" | "system";
+  actor_id?: string | null;
+  correlation_id?: string | null;
+  tool_call_id?: string | null;
+  approval_id?: string | null;
+  payload?: P05Metadata | null;
+  org_id?: string | null;
+  project_id?: string | null;
+  request_id?: string | null;
+  device_id?: string | null;
+  agent_session_id?: string | null;
+  schema_version?: number;
+  recorded_at?: string | null;
+}
+
+export interface ListRunEventsQuery {
+  limit?: number;
+  cursor?: string;
+  after_sequence?: number;
+}
+
+export type ArtifactKind = "local_only" | "cloud_uploaded" | "external_link";
+
+export interface ArtifactRef {
+  id: string;
+  org_id: string;
+  project_id: string;
+  run_id: string;
+  kind: ArtifactKind;
+  content_ref?: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  checksum: string | null;
+  retention_policy: string;
+  created_at: string;
+}
+
+export type ArtifactRecord = ArtifactRef;
+
+export interface CreateArtifactInput {
+  kind: ArtifactKind;
+  content_ref?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  checksum?: string | null;
+  retention_policy?: string;
+}
+
+export type CreateRunArtifactInput = CreateArtifactInput;
+export type CreateArtifactRequest = CreateArtifactInput;
+
+export async function listAgents(
+  orgId: string,
+  queryOrSignal?: ListAgentsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<AgentDefinition>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "agents"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isAgentDefinitionPage,
+  );
+}
+
+export async function createAgent(
+  orgId: string,
+  input: CreateAgentInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<AgentDefinition> {
+  return requestJson(
+    p05OrgPath(orgId, "agents"),
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isAgentDefinition,
+  );
+}
+
+export async function getAgent(
+  orgId: string,
+  agentId: string,
+  signal?: AbortSignal,
+): Promise<AgentDefinition> {
+  return requestJson(
+    `${p05OrgPath(orgId, "agents")}/${encodeURIComponent(agentId)}`,
+    signal ? { signal } : {},
+    isAgentDefinition,
+  );
+}
+
+export async function updateAgent(
+  orgId: string,
+  agentId: string,
+  input: UpdateAgentInput,
+  signal?: AbortSignal,
+): Promise<AgentDefinition> {
+  return requestJson(
+    `${p05OrgPath(orgId, "agents")}/${encodeURIComponent(agentId)}`,
+    { method: "PATCH", body: input, ...(signal ? { signal } : {}) },
+    isAgentDefinition,
+  );
+}
+
+export const patchAgent = updateAgent;
+
+export async function listAgentSessions(
+  orgId: string,
+  queryOrSignal?: ListAgentSessionsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<AgentSession>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "sessions"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isAgentSessionPage,
+  );
+}
+
+export async function createAgentSession(
+  orgId: string,
+  input: CreateAgentSessionInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<AgentSession> {
+  return requestJson(
+    p05OrgPath(orgId, "sessions"),
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isAgentSession,
+  );
+}
+
+export const createSession = createAgentSession;
+
+export async function getAgentSession(
+  orgId: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<AgentSession> {
+  return requestJson(
+    `${p05OrgPath(orgId, "sessions")}/${encodeURIComponent(sessionId)}`,
+    signal ? { signal } : {},
+    isAgentSession,
+  );
+}
+
+export const getSession = getAgentSession;
+
+export async function closeAgentSession(
+  orgId: string,
+  sessionId: string,
+  input: { version: number },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<AgentSession> {
+  return requestJson(
+    `${p05OrgPath(orgId, "sessions")}/${encodeURIComponent(sessionId)}/close`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isAgentSession,
+  );
+}
+
+export const closeSession = closeAgentSession;
+
+export async function listRuns(
+  orgId: string,
+  queryOrSignal?: ListRunsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<Run>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "runs"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isRunPage,
+  );
+}
+
+export async function startRun(
+  orgId: string,
+  input: StartRunInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<Run> {
+  return requestJson(
+    p05OrgPath(orgId, "runs"),
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isRun,
+  );
+}
+
+export const createRun = startRun;
+
+export async function getRun(orgId: string, runId: string, signal?: AbortSignal): Promise<Run> {
+  return requestJson(
+    `${p05OrgPath(orgId, "runs")}/${encodeURIComponent(runId)}`,
+    signal ? { signal } : {},
+    isRun,
+  );
+}
+
+export async function cancelRun(
+  orgId: string,
+  runId: string,
+  input: CancelRunInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<Run> {
+  return requestJson(
+    `${p05OrgPath(orgId, "runs")}/${encodeURIComponent(runId)}/cancel`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isRun,
+  );
+}
+
+export async function retryRun(
+  orgId: string,
+  runId: string,
+  input: RetryRunInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<Run> {
+  return requestJson(
+    `${p05OrgPath(orgId, "runs")}/${encodeURIComponent(runId)}/retry`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isRun,
+  );
+}
+
+export async function listRunEvents(
+  orgId: string,
+  runId: string,
+  queryOrSignal?: ListRunEventsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<RunEvent>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(`${p05OrgPath(orgId, "runs")}/${encodeURIComponent(runId)}/events`, request.query),
+    request.signal ? { signal: request.signal } : {},
+    isRunEventPage,
+  );
+}
+
+export async function listRunArtifacts(
+  orgId: string,
+  runId: string,
+  queryOrSignal?: Pick<ListRunEventsQuery, "limit" | "cursor"> | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<ArtifactRef>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(
+      `${p05OrgPath(orgId, "runs")}/${encodeURIComponent(runId)}/artifacts`,
+      request.query,
+    ),
+    request.signal ? { signal: request.signal } : {},
+    isArtifactPage,
+  );
+}
+
+export async function createRunArtifact(
+  orgId: string,
+  runId: string,
+  input: CreateArtifactInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<ArtifactRef> {
+  return requestJson(
+    `${p05OrgPath(orgId, "runs")}/${encodeURIComponent(runId)}/artifacts`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isArtifactRef,
+  );
+}
+
+export const createArtifact = createRunArtifact;
+
+// ---------------------------------------------------------------------------
+// P05 — tool catalog, MCP registrations, policy, and approvals
+// ---------------------------------------------------------------------------
+
+export type ToolSource = "built_in" | "plugin" | "custom";
+export type ToolRiskClass =
+  | "read_only"
+  | "filesystem_write"
+  | "process_execution"
+  | "network"
+  | "mcp"
+  | "browser"
+  | "computer"
+  | "credential_bearing"
+  | "external_side_effect"
+  | "destructive";
+export type ToolLifecycle = "active" | "review" | "disabled";
+export type ToolDecision =
+  | "allow"
+  | "require_session_approval"
+  | "require_per_use_approval"
+  | "deny";
+export type McpTransport = "http" | "sse" | "stdio" | "other";
+export type McpPolicyStatus = "approved" | "pending_review" | "denied" | "disabled";
+export type ApprovalMode = "session" | "per_use";
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
+export type ApprovalDecision = "approved" | "denied";
+export type ExternalSubmitDecision = "deny" | "allow" | "require_approval";
+
+export interface CapabilityDefinition {
+  capability_id: string;
+  org_id: string | null;
+  capability_key: string;
+  display_name: string;
+  risk_class: ToolRiskClass;
+  metadata?: P05Metadata | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolDefinition {
+  tool_id: string;
+  org_id: string;
+  name: string;
+  source: ToolSource;
+  risk_class: ToolRiskClass;
+  capability_ids: string[];
+  fingerprint: string;
+  lifecycle: ToolLifecycle;
+  metadata?: P05Metadata | null;
+  version: number;
+  created_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  decision?: ToolDecision;
+  review_required?: boolean;
+  mcp_id?: string | null;
+}
+
+export interface CreateToolInput {
+  name: string;
+  source: ToolSource;
+  risk_class: ToolRiskClass;
+  capability_ids: string[];
+  fingerprint: string;
+  metadata?: P05Metadata | null;
+}
+
+export interface UpdateToolInput {
+  lifecycle?: ToolLifecycle;
+  risk_class?: ToolRiskClass;
+  capability_ids?: string[];
+  fingerprint?: string;
+  version: number;
+}
+
+export interface ListToolsQuery {
+  limit?: number;
+  cursor?: string;
+  source?: ToolSource;
+  risk_class?: ToolRiskClass;
+}
+
+export interface McpToolEntry {
+  tool_id: string;
+  name?: string;
+  fingerprint?: string | null;
+  risk_class?: ToolRiskClass;
+  review_required?: boolean;
+}
+
+export interface McpRegistration {
+  mcp_id: string;
+  org_id: string;
+  source: ToolSource;
+  transport: McpTransport;
+  endpoint_metadata?: P05Metadata | null;
+  command_metadata?: P05Metadata | null;
+  allowed_origins: string[];
+  required_secret_handles: string[];
+  tool_fingerprint: string | null;
+  tool_list: Array<string | McpToolEntry>;
+  policy_status: McpPolicyStatus;
+  version: number;
+  created_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateMcpRegistrationInput {
+  source: ToolSource;
+  transport: McpTransport;
+  endpoint_metadata?: P05Metadata | null;
+  command_metadata?: P05Metadata | null;
+  allowed_origins?: string[];
+  required_secret_handles?: string[];
+  tool_fingerprint?: string | null;
+}
+
+export interface UpdateMcpRegistrationInput {
+  source?: ToolSource;
+  transport?: McpTransport;
+  endpoint_metadata?: P05Metadata | null;
+  command_metadata?: P05Metadata | null;
+  allowed_origins?: string[];
+  required_secret_handles?: string[];
+  tool_fingerprint?: string | null;
+  policy_status?: McpPolicyStatus;
+  version: number;
+}
+
+export interface BrowserPolicy {
+  allowed_domains: string[];
+  blocked_domains: string[];
+  allow_download: boolean;
+  allow_upload: boolean;
+  allow_authenticated: boolean;
+  allow_clipboard: boolean;
+  external_submit: ExternalSubmitDecision;
+}
+
+export interface ComputerPolicy {
+  allow_accessibility: boolean;
+  allow_screen_capture: boolean;
+  allow_keyboard_mouse: boolean;
+  allow_shell_escalation: boolean;
+  allowed_applications: string[];
+  blocked_applications?: string[];
+}
+
+export interface ToolPolicyRule {
+  tool_id: string;
+  capability_id?: string | null;
+  decision: ToolDecision;
+  argument_scope?: string[];
+}
+
+export interface ToolPolicyEntry {
+  tool_id: string;
+  decision: ToolDecision;
+  fingerprint?: string | null;
+  review_required?: boolean;
+}
+
+export interface ToolPolicyDocument {
+  schema_version: 1;
+  default_posture: ToolDecision;
+  tool_ids: string[];
+  mcp_ids: string[];
+  rules?: ToolPolicyRule[];
+  tool_decisions?: Record<string, ToolDecision>;
+  entries?: ToolPolicyEntry[];
+  browser: BrowserPolicy;
+  computer: ComputerPolicy;
+}
+
+export interface ToolPolicy {
+  tool_policy_id?: string | null;
+  org_id: string | null;
+  project_id?: string | null;
+  policy_version: number;
+  version: number;
+  document: ToolPolicyDocument;
+  policy_state?: "ok" | "missing" | "schema_unsupported";
+  created_at?: string | null;
+  updated_at?: string | null;
+  expires_at?: string | null;
+}
+
+export interface ListToolPolicyQuery {
+  project_id?: string;
+}
+
+export interface FlatToolPolicyInput {
+  schema_version: number;
+  default_posture?: ToolPolicyDocument["default_posture"];
+  tool_ids?: string[];
+  mcp_ids?: string[];
+  rules?: ToolPolicyRule[];
+  tool_decisions?: Record<string, ToolDecision>;
+  entries?: ToolPolicyEntry[];
+  browser?: BrowserPolicy;
+  computer?: ComputerPolicy;
+}
+
+export type UpdateToolPolicyInput =
+  | (FlatToolPolicyInput & { version: number; project_id?: string | null })
+  | { document: ToolPolicyDocument; version: number; project_id?: string | null };
+
+export interface ApprovalRequest {
+  id: string;
+  org_id: string;
+  project_id: string;
+  run_id: string;
+  agent_session_id?: string | null;
+  tool_call_id: string;
+  tool_id: string;
+  tool_fingerprint: string | null;
+  risk_class: ToolRiskClass;
+  approval_mode: ApprovalMode;
+  status: ApprovalStatus;
+  arguments_summary: string;
+  arguments_hash?: string | null;
+  policy_snapshot_id?: string | null;
+  policy_version?: number | null;
+  requested_by_device_id?: string | null;
+  requested_by_principal_id: string | null;
+  requested_at: string;
+  expires_at: string;
+  resolved_by_principal_id: string | null;
+  resolved_at: string | null;
+  resolution_reason: string | null;
+  decision?: ApprovalDecision | null;
+  consumed_at?: string | null;
+  consumed_by_device_id?: string | null;
+  version: number;
+}
+
+export interface ListApprovalsQuery {
+  limit?: number;
+  cursor?: string;
+  status?: ApprovalStatus;
+  run_id?: string;
+}
+
+export interface ResolveApprovalInput {
+  decision: ApprovalDecision;
+  reason?: string;
+  version: number;
+}
+
+export type ResolveApprovalRequest = ResolveApprovalInput;
+
+export interface ToolDecisionResponse {
+  decision: ToolDecision;
+  approval_id?: string | null;
+  policy_version: number;
+}
+
+export interface ToolDecisionRequest {
+  tool_call_id: string;
+  tool_id: string;
+  tool_fingerprint: string;
+  capability_ids: string[];
+  risk_class: ToolRiskClass;
+  arguments_summary: string;
+}
+
+export async function listTools(
+  orgId: string,
+  queryOrSignal?: ListToolsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<ToolDefinition>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "tools"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isToolDefinitionPage,
+  );
+}
+
+export async function createTool(
+  orgId: string,
+  input: CreateToolInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<ToolDefinition> {
+  return requestJson(
+    p05OrgPath(orgId, "tools"),
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isToolDefinition,
+  );
+}
+
+export async function updateTool(
+  orgId: string,
+  toolId: string,
+  input: UpdateToolInput,
+  signal?: AbortSignal,
+): Promise<ToolDefinition> {
+  return requestJson(
+    `${p05OrgPath(orgId, "tools")}/${encodeURIComponent(toolId)}`,
+    { method: "PATCH", body: input, ...(signal ? { signal } : {}) },
+    isToolDefinition,
+  );
+}
+
+export const patchTool = updateTool;
+
+export async function listMcpRegistrations(
+  orgId: string,
+  queryOrSignal?: Pick<ListToolsQuery, "limit" | "cursor"> | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<McpRegistration>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "mcp"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isMcpRegistrationPage,
+  );
+}
+
+export async function createMcpRegistration(
+  orgId: string,
+  input: CreateMcpRegistrationInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<McpRegistration> {
+  return requestJson(
+    p05OrgPath(orgId, "mcp"),
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isMcpRegistration,
+  );
+}
+
+export async function updateMcpRegistration(
+  orgId: string,
+  mcpId: string,
+  input: UpdateMcpRegistrationInput,
+  signal?: AbortSignal,
+): Promise<McpRegistration> {
+  return requestJson(
+    `${p05OrgPath(orgId, "mcp")}/${encodeURIComponent(mcpId)}`,
+    { method: "PATCH", body: input, ...(signal ? { signal } : {}) },
+    isMcpRegistration,
+  );
+}
+
+export const patchMcpRegistration = updateMcpRegistration;
+
+export async function getToolPolicy(
+  orgId: string,
+  queryOrSignal?: ListToolPolicyQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<ToolPolicy> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "policy/tools"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isToolPolicy,
+  );
+}
+
+export async function updateToolPolicy(
+  orgId: string,
+  input: UpdateToolPolicyInput,
+  signal?: AbortSignal,
+): Promise<ToolPolicy> {
+  const body =
+    "document" in input
+      ? {
+          ...input.document,
+          version: input.version,
+          ...(input.project_id === undefined ? {} : { project_id: input.project_id }),
+        }
+      : input;
+  return requestJson(
+    p05OrgPath(orgId, "policy/tools"),
+    { method: "PUT", body, ...(signal ? { signal } : {}) },
+    isToolPolicy,
+  );
+}
+
+export const putToolPolicy = updateToolPolicy;
+
+export async function listApprovals(
+  orgId: string,
+  queryOrSignal?: ListApprovalsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<ApprovalRequest>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "approvals"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isApprovalPage,
+  );
+}
+
+export async function getApproval(
+  orgId: string,
+  approvalId: string,
+  signal?: AbortSignal,
+): Promise<ApprovalRequest> {
+  return requestJson(
+    `${p05OrgPath(orgId, "approvals")}/${encodeURIComponent(approvalId)}`,
+    signal ? { signal } : {},
+    isApproval,
+  );
+}
+
+export async function resolveApproval(
+  orgId: string,
+  approvalId: string,
+  input: ResolveApprovalInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<ApprovalRequest> {
+  return requestJson(
+    `${p05OrgPath(orgId, "approvals")}/${encodeURIComponent(approvalId)}/resolve`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isApproval,
+  );
+}
+
+/**
+ * The broker endpoint is device-token authenticated. The token is passed only
+ * for this request and is never stored by the client.
+ */
+export async function requestToolDecision(
+  runId: string,
+  input: ToolDecisionRequest,
+  deviceToken: string,
+  signal?: AbortSignal,
+): Promise<ToolDecisionResponse> {
+  return requestJson(
+    `/api/v1/runs/${encodeURIComponent(runId)}/tool-decisions`,
+    {
+      method: "POST",
+      body: input,
+      headers: { Authorization: `DeviceToken ${deviceToken}` },
+      skipCsrf: true,
+      ...(signal ? { signal } : {}),
+    },
+    isToolDecisionResponse,
+  );
+}
+
+export const evaluateToolDecision = requestToolDecision;
+
+// ---------------------------------------------------------------------------
+// P05 — usage, cost, budgets, reservations, and rate/concurrency policies
+// ---------------------------------------------------------------------------
+
+export type UsageSource = "inference" | "run";
+export type UsageReconciliationStatus = "recorded" | "pending" | "reconciled" | "conflict";
+export type BudgetScopeType =
+  | "organization"
+  | "project"
+  | "user"
+  | "service_account"
+  | "model_alias";
+export type BudgetLifecycle = "active" | "paused" | "archived" | "disabled";
+export type BudgetState = "active" | "paused" | "archived" | "disabled" | "unavailable";
+export type RateLimitStatus = "healthy" | "rate_limited" | "degraded" | "unhealthy" | "unknown";
+export type UsageDenialLimitType = "budget" | "rate_limit" | "concurrency" | "policy" | "unknown";
+
+export interface UsageEvent {
+  id: string;
+  /** Present only when a backend projection preserves the P04 key name. */
+  usage_event_id?: string;
+  request_id: string | null;
+  org_id: string;
+  project_id: string | null;
+  run_id: string | null;
+  principal_user_id: string;
+  session_id: string | null;
+  device_id: string | null;
+  source: UsageSource;
+  external_id: string | null;
+  reconciliation_status: UsageReconciliationStatus;
+  model_alias: string | null;
+  route_version_id?: string | null;
+  provider_id?: string | null;
+  model_id?: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_tokens: number | null;
+  provider_usage?: P05Metadata;
+  estimated_cost_minor: number | null;
+  actual_cost_minor: number | null;
+  currency: string | null;
+  pricing_version: string | null;
+  budget_decision: string;
+  ttft_ms?: number | null;
+  total_latency_ms?: number | null;
+  created_at: string;
+  reconciliation_state?: UsageReconciliationStatus;
+  reconciled_at?: string | null;
+  denial_code?: string | null;
+  credential_id?: string | null;
+  agent_session_id?: string | null;
+}
+
+export type P05UsageEvent = UsageEvent;
+
+export interface ListUsageEventsQuery {
+  limit?: number;
+  cursor?: string;
+  project_id?: string;
+  run_id?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface ListUsageSummaryQuery {
+  project_id?: string;
+  run_id?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface UsageSummary {
+  org_id: string;
+  project_id: string | null;
+  run_id: string | null;
+  from: string | null;
+  to: string | null;
+  event_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  cost_minor: number;
+}
+
+export interface ListUsageRollupsQuery {
+  limit?: number;
+  cursor?: string;
+  project_id?: string;
+  principal_user_id?: string;
+  model_alias?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface UsageRollup {
+  id: string;
+  org_id: string;
+  project_id: string | null;
+  principal_user_id: string | null;
+  model_alias: string | null;
+  bucket_start: string;
+  bucket_end: string;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  cost_minor: number;
+  usage_event_count: number;
+  updated_at: string;
+}
+
+export interface PricingVersion {
+  source: string;
+  version: string;
+  effective_at: string;
+}
+
+export interface CostRecord {
+  id: string;
+  /** Present only when a backend projection preserves the P04 key name. */
+  cost_record_id?: string;
+  usage_event_id: string;
+  org_id: string;
+  project_id: string | null;
+  run_id: string | null;
+  pricing_source: string;
+  pricing_version: string;
+  pricing_effective_at: string;
+  calculation_kind: "estimated" | "actual" | "recalculated";
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_tokens: number | null;
+  cost_minor: number;
+  currency: string;
+  created_at: string;
+  recalculated_from_cost_record_id?: string | null;
+}
+
+interface UsageReconciliationInputBase {
+  external_id?: string;
+  actual_cost_minor?: number;
+  provider_usage?: P05Metadata;
+}
+
+export type UsageReconciliationInput =
+  | (UsageReconciliationInputBase & { request_id: string; run_id?: never })
+  | (UsageReconciliationInputBase & { run_id: string; request_id?: never });
+
+export interface UsageReconciliationResponse {
+  usage_event: UsageEvent;
+  cost_record: CostRecord | null;
+}
+
+export interface Budget {
+  budget_id: string;
+  org_id: string;
+  scope_type: BudgetScopeType;
+  scope_id: string | null;
+  period_start: string;
+  period_end: string;
+  limit_minor: number;
+  spent_minor: number | null;
+  used_minor: number | null;
+  reserved_minor: number | null;
+  currency: string | null;
+  hard: boolean;
+  lifecycle: BudgetLifecycle;
+  state: BudgetState;
+  version: number;
+  created_at?: string | null;
+  updated_at: string | null;
+}
+
+export interface ListBudgetsQuery {
+  limit?: number;
+  cursor?: string;
+  scope_type?: BudgetScopeType;
+  scope_id?: string;
+}
+
+export interface CreateBudgetInput {
+  scope_type: BudgetScopeType;
+  scope_id?: string | null;
+  period_start: string;
+  period_end: string;
+  limit_minor: number;
+  currency: string;
+  hard: boolean;
+}
+
+export interface UpdateBudgetInput {
+  limit_minor?: number;
+  period_start?: string;
+  period_end?: string;
+  lifecycle?: BudgetLifecycle;
+  currency?: string;
+  version: number;
+}
+
+export interface BudgetReservation {
+  reservation_id: string;
+  request_id: string;
+  run_id: string | null;
+  org_id: string;
+  budget_id: string | null;
+  reserved_minor: number;
+  committed_minor: number | null;
+  status: "reserved" | "committed" | "released" | "expired" | "failed";
+  currency: string | null;
+  expires_at: string;
+  reconciled_at: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface CreateBudgetReservationInput {
+  request_id: string;
+  run_id?: string;
+  reserved_minor: number;
+  expires_at: string;
+}
+
+export type ReservationReconciliationStatus = "committed" | "released";
+
+export interface ReconcileBudgetReservationInput {
+  actual_minor?: number;
+  status: ReservationReconciliationStatus;
+}
+
+export interface RateLimitPolicy {
+  rate_limit_policy_id: string;
+  org_id: string;
+  scope_type: BudgetScopeType;
+  scope_id: string | null;
+  requests_per_minute: number | null;
+  tokens_per_minute: number | null;
+  max_concurrent_requests: number | null;
+  applicable_model_aliases: string[];
+  status: RateLimitStatus;
+  version: number;
+  updated_at: string | null;
+  enabled?: boolean;
+  created_at?: string | null;
+}
+
+export interface ListRateLimitsQuery {
+  limit?: number;
+  cursor?: string;
+  scope_type?: BudgetScopeType;
+  scope_id?: string;
+}
+
+export interface UpdateRateLimitInput {
+  requests_per_minute?: number | null;
+  tokens_per_minute?: number | null;
+  max_concurrent_requests?: number | null;
+  version: number;
+}
+
+export interface UsageDenial {
+  id: string;
+  denial_id: string;
+  org_id: string;
+  code: string;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  outcome: string;
+  reason: string | null;
+  request_id: string | null;
+  correlation_id: string | null;
+  run_id: string | null;
+  agent_session_id: string | null;
+  project_id: string | null;
+  scope_type: BudgetScopeType | null;
+  scope_id: string | null;
+  model_alias: string | null;
+  limit_type: UsageDenialLimitType;
+  retry_after_seconds: number | null;
+  created_at: string;
+}
+
+export interface ListUsageDenialsQuery {
+  limit?: number;
+  cursor?: string;
+  from?: string;
+  to?: string;
+}
+
+export async function listUsageEvents(
+  orgId: string,
+  queryOrSignal?: ListUsageEventsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<UsageEvent>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "usage"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isUsageEventPage,
+  );
+}
+
+export async function listUsageSummary(
+  orgId: string,
+  queryOrSignal?: ListUsageSummaryQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<UsageSummary> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "usage/summary"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isUsageSummary,
+  );
+}
+
+export async function listUsageRollups(
+  orgId: string,
+  queryOrSignal?: ListUsageRollupsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<UsageRollup>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "usage/rollups"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isUsageRollupPage,
+  );
+}
+
+/**
+ * Internal accounting reconciliation. This route is not a browser mutation;
+ * callers must provide their service-auth headers through `headers`. The
+ * browser client does not persist the headers or provider payload.
+ */
+export async function reconcileUsage(
+  orgId: string,
+  input: UsageReconciliationInput,
+  idempotencyKey: string,
+  headersOrSignal?: HeadersInit | AbortSignal,
+  signal?: AbortSignal,
+): Promise<UsageReconciliationResponse> {
+  const requestHeaders = isAbortSignal(headersOrSignal) ? undefined : headersOrSignal;
+  const requestSignal = isAbortSignal(headersOrSignal) ? headersOrSignal : signal;
+  return requestJson(
+    p05OrgPath(orgId, "usage/reconcile"),
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(requestHeaders ? { headers: requestHeaders } : {}),
+      skipCsrf: true,
+      ...(requestSignal ? { signal: requestSignal } : {}),
+    },
+    isUsageReconciliationResponse,
+  );
+}
+
+export async function listBudgets(
+  orgId: string,
+  queryOrSignal?: ListBudgetsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<Budget>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "budgets"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    isBudgetPage,
+  );
+}
+
+export async function getBudget(
+  orgId: string,
+  budgetId: string,
+  signal?: AbortSignal,
+): Promise<Budget> {
+  return requestJson(
+    `${p05OrgPath(orgId, "budgets")}/${encodeURIComponent(budgetId)}`,
+    signal ? { signal } : {},
+    isBudget,
+  );
+}
+
+export async function createBudget(
+  orgId: string,
+  input: CreateBudgetInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<Budget> {
+  return requestJson(
+    p05OrgPath(orgId, "budgets"),
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isBudget,
+  );
+}
+
+export async function updateBudget(
+  orgId: string,
+  budgetId: string,
+  input: UpdateBudgetInput,
+  signal?: AbortSignal,
+): Promise<Budget> {
+  return requestJson(
+    `${p05OrgPath(orgId, "budgets")}/${encodeURIComponent(budgetId)}`,
+    { method: "PATCH", body: input, ...(signal ? { signal } : {}) },
+    isBudget,
+  );
+}
+
+export const patchBudget = updateBudget;
+
+/**
+ * Reservation writes are server/internal operations. The explicit headers
+ * argument prevents a browser UI from accidentally treating this as a public
+ * mutation; callers must supply the service identity expected by the Worker.
+ */
+export async function createBudgetReservation(
+  orgId: string,
+  budgetId: string,
+  input: CreateBudgetReservationInput,
+  idempotencyKey: string,
+  headersOrSignal?: HeadersInit | AbortSignal,
+  signal?: AbortSignal,
+): Promise<BudgetReservation> {
+  const requestHeaders = isAbortSignal(headersOrSignal) ? undefined : headersOrSignal;
+  const requestSignal = isAbortSignal(headersOrSignal) ? headersOrSignal : signal;
+  return requestJson(
+    `${p05OrgPath(orgId, "budgets")}/${encodeURIComponent(budgetId)}/reservations`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(requestHeaders ? { headers: requestHeaders } : {}),
+      skipCsrf: true,
+      ...(requestSignal ? { signal: requestSignal } : {}),
+    },
+    isBudgetReservation,
+  );
+}
+
+export async function reconcileBudgetReservation(
+  orgId: string,
+  budgetId: string,
+  reservationId: string,
+  input: ReconcileBudgetReservationInput,
+  idempotencyKey: string,
+  headersOrSignal?: HeadersInit | AbortSignal,
+  signal?: AbortSignal,
+): Promise<BudgetReservation> {
+  const requestHeaders = isAbortSignal(headersOrSignal) ? undefined : headersOrSignal;
+  const requestSignal = isAbortSignal(headersOrSignal) ? headersOrSignal : signal;
+  return requestJson(
+    `${p05OrgPath(orgId, "budgets")}/${encodeURIComponent(budgetId)}/reservations/${encodeURIComponent(reservationId)}/reconcile`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(requestHeaders ? { headers: requestHeaders } : {}),
+      skipCsrf: true,
+      ...(requestSignal ? { signal: requestSignal } : {}),
+    },
+    isBudgetReservation,
+  );
+}
+
+export async function listBudgetReservations(
+  orgId: string,
+  queryOrSignal?: Pick<ListBudgetsQuery, "limit" | "cursor"> | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<BudgetReservation>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(`${p05OrgPath(orgId, "budgets")}/reservations`, request.query),
+    request.signal ? { signal: request.signal } : {},
+    isBudgetReservationPage,
+  );
+}
+
+export async function listRateLimits(
+  orgId: string,
+  queryOrSignal?: ListRateLimitsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<RateLimitPolicy>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "rate-limits"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    { decode: normalizeRateLimitPolicyPage },
+  );
+}
+
+export async function updateRateLimit(
+  orgId: string,
+  scopeType: BudgetScopeType,
+  scopeId: string,
+  input: UpdateRateLimitInput,
+  signal?: AbortSignal,
+): Promise<RateLimitPolicy> {
+  return requestJson(
+    `${p05OrgPath(orgId, "rate-limits")}/${encodeURIComponent(scopeType)}/${encodeURIComponent(scopeId)}`,
+    { method: "PUT", body: input, ...(signal ? { signal } : {}) },
+    { decode: normalizeRateLimitPolicy },
+  );
+}
+
+export const putRateLimit = updateRateLimit;
+
+export async function listUsageDenials(
+  orgId: string,
+  queryOrSignal?: ListUsageDenialsQuery | AbortSignal,
+  signal?: AbortSignal,
+): Promise<Page<UsageDenial>> {
+  const request = resolveP05Query(queryOrSignal, signal);
+  return requestJson(
+    withP05Query(p05OrgPath(orgId, "usage/denials"), request.query),
+    request.signal ? { signal: request.signal } : {},
+    { decode: (value) => normalizeUsageDenialPage(value, orgId) },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// P05 request helpers and strict response decoders
+// ---------------------------------------------------------------------------
+
+function p05OrgPath(orgId: string, suffix: string): string {
+  return `/api/v1/orgs/${encodeURIComponent(orgId)}/${suffix}`;
+}
+
+function resolveP05Query<T extends object>(
+  queryOrSignal: T | AbortSignal | undefined,
+  signal: AbortSignal | undefined,
+): { query: T | undefined; signal: AbortSignal | undefined } {
+  if (isAbortSignal(queryOrSignal)) return { query: undefined, signal: queryOrSignal };
+  return { query: queryOrSignal, signal };
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return typeof value === "object" && value !== null && "aborted" in value;
+}
+
+function withP05Query(path: string, query: object | undefined): string {
+  if (!query) return path;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      params.set(key, String(value));
+    }
+  }
+  const encoded = params.toString();
+  return encoded ? `${path}?${encoded}` : path;
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || isNullableString(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isOptionalNullableNonNegativeInteger(value: unknown): value is number | null | undefined {
+  return value === undefined || value === null || isNonNegativeInteger(value);
+}
+
+function isOptionalPositiveInteger(value: unknown): value is number | null | undefined {
+  return value === undefined || value === null || isPositiveInteger(value);
+}
+
+function isOptionalMetadata(value: unknown): value is P05Metadata | null | undefined {
+  return value === undefined || value === null || isObject(value);
+}
+
+function isAgentDefinition(value: unknown): value is AgentDefinition {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.org_id === "string" &&
+    isNullableString(value.project_id) &&
+    typeof value.name === "string" &&
+    isNullableString(value.description) &&
+    isNullableString(value.instructions_ref) &&
+    isNullableString(value.default_model_alias) &&
+    isStringArray(value.required_capabilities) &&
+    isStringArray(value.allowed_tool_ids) &&
+    isStringArray(value.runtime_requirements) &&
+    isAgentDefinitionLifecycle(value.lifecycle) &&
+    isPositiveInteger(value.version) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isAgentDefinitionPage(value: unknown): value is Page<AgentDefinition> {
+  return isPage(value, isAgentDefinition);
+}
+
+function isAgentSession(value: unknown): value is AgentSession {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.project_id === "string" &&
+    typeof value.device_id === "string" &&
+    isNullableString(value.workspace_binding_id) &&
+    typeof value.agent_definition_id === "string" &&
+    isPositiveInteger(value.agent_definition_version) &&
+    isNullableString(value.external_id) &&
+    isNullableString(value.title) &&
+    isAgentSessionLifecycle(value.lifecycle) &&
+    isPositiveInteger(value.version) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isAgentSessionPage(value: unknown): value is Page<AgentSession> {
+  return isPage(value, isAgentSession);
+}
+
+function isRun(value: unknown): value is Run {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.project_id === "string" &&
+    typeof value.agent_session_id === "string" &&
+    isNullableString(value.parent_run_id) &&
+    isPositiveInteger(value.attempt) &&
+    typeof value.agent_definition_id === "string" &&
+    isPositiveInteger(value.agent_definition_version) &&
+    typeof value.principal_user_id === "string" &&
+    typeof value.device_id === "string" &&
+    isNullableString(value.model_alias) &&
+    isNullableString(value.route_id) &&
+    isNullableString(value.route_version_id) &&
+    isRunState(value.state) &&
+    isNullableString(value.failure_code) &&
+    isNullableString(value.request_id) &&
+    isNullableString(value.started_at) &&
+    isNullableString(value.finished_at) &&
+    isPositiveInteger(value.version) &&
+    isOptionalPositiveInteger(value.state_version) &&
+    isOptionalString(value.workspace_binding_id) &&
+    isOptionalString(value.policy_snapshot_id) &&
+    isOptionalPositiveInteger(value.policy_version) &&
+    isOptionalString(value.cancel_requested_at) &&
+    isOptionalString(value.resumed_from_run_id) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isRunPage(value: unknown): value is Page<Run> {
+  return isPage(value, isRun);
+}
+
+function isRunEvent(value: unknown): value is RunEvent {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.run_id === "string" &&
+    isPositiveInteger(value.sequence) &&
+    typeof value.event_type === "string" &&
+    typeof value.occurred_at === "string" &&
+    isRunActorType(value.actor_type) &&
+    isOptionalString(value.actor_id) &&
+    isOptionalString(value.correlation_id) &&
+    isOptionalString(value.tool_call_id) &&
+    isOptionalString(value.approval_id) &&
+    isOptionalMetadata(value.payload) &&
+    isOptionalString(value.org_id) &&
+    isOptionalString(value.project_id) &&
+    isOptionalString(value.request_id) &&
+    isOptionalString(value.device_id) &&
+    isOptionalString(value.agent_session_id) &&
+    isOptionalPositiveInteger(value.schema_version) &&
+    isOptionalString(value.recorded_at)
+  );
+}
+
+function isRunEventPage(value: unknown): value is Page<RunEvent> {
+  return isPage(value, isRunEvent);
+}
+
+function isArtifactRef(value: unknown): value is ArtifactRef {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.project_id === "string" &&
+    typeof value.run_id === "string" &&
+    isArtifactKind(value.kind) &&
+    isOptionalString(value.content_ref) &&
+    isNullableString(value.mime_type) &&
+    (value.size_bytes === null || isNonNegativeInteger(value.size_bytes)) &&
+    isNullableString(value.checksum) &&
+    typeof value.retention_policy === "string" &&
+    typeof value.created_at === "string"
+  );
+}
+
+function isArtifactPage(value: unknown): value is Page<ArtifactRef> {
+  return isPage(value, isArtifactRef);
+}
+
+function isAgentDefinitionLifecycle(value: unknown): value is AgentDefinitionLifecycle {
+  return value === "active" || value === "archived" || value === "disabled";
+}
+
+function isAgentSessionLifecycle(value: unknown): value is AgentSessionLifecycle {
+  return value === "active" || value === "closed" || value === "archived";
+}
+
+function isRunState(value: unknown): value is RunState {
+  return typeof value === "string" && (RUN_STATES as readonly string[]).includes(value);
+}
+
+function isRunActorType(value: unknown): value is "user" | "device" | "service_account" | "system" {
+  return (
+    value === "user" || value === "device" || value === "service_account" || value === "system"
+  );
+}
+
+function isArtifactKind(value: unknown): value is ArtifactKind {
+  return value === "local_only" || value === "cloud_uploaded" || value === "external_link";
+}
+
+function isToolDefinition(value: unknown): value is ToolDefinition {
+  return (
+    isObject(value) &&
+    typeof value.tool_id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.name === "string" &&
+    isToolSource(value.source) &&
+    isToolRiskClass(value.risk_class) &&
+    isStringArray(value.capability_ids) &&
+    typeof value.fingerprint === "string" &&
+    isToolLifecycle(value.lifecycle) &&
+    isOptionalMetadata(value.metadata) &&
+    isPositiveInteger(value.version) &&
+    isOptionalString(value.created_by_user_id) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string" &&
+    (value.decision === undefined || isToolDecision(value.decision)) &&
+    (value.review_required === undefined || typeof value.review_required === "boolean") &&
+    isOptionalString(value.mcp_id)
+  );
+}
+
+function isToolDefinitionPage(value: unknown): value is Page<ToolDefinition> {
+  return isPage(value, isToolDefinition);
+}
+
+function isToolSource(value: unknown): value is ToolSource {
+  return value === "built_in" || value === "plugin" || value === "custom";
+}
+
+function isToolRiskClass(value: unknown): value is ToolRiskClass {
+  return (
+    value === "read_only" ||
+    value === "filesystem_write" ||
+    value === "process_execution" ||
+    value === "network" ||
+    value === "mcp" ||
+    value === "browser" ||
+    value === "computer" ||
+    value === "credential_bearing" ||
+    value === "external_side_effect" ||
+    value === "destructive"
+  );
+}
+
+function isToolLifecycle(value: unknown): value is ToolLifecycle {
+  return value === "active" || value === "review" || value === "disabled";
+}
+
+function isToolDecision(value: unknown): value is ToolDecision {
+  return (
+    value === "allow" ||
+    value === "require_session_approval" ||
+    value === "require_per_use_approval" ||
+    value === "deny"
+  );
+}
+
+function isMcpTransport(value: unknown): value is McpTransport {
+  return value === "http" || value === "sse" || value === "stdio" || value === "other";
+}
+
+function isMcpPolicyStatus(value: unknown): value is McpPolicyStatus {
+  return (
+    value === "approved" || value === "pending_review" || value === "denied" || value === "disabled"
+  );
+}
+
+function isMcpToolEntry(value: unknown): value is string | McpToolEntry {
+  if (typeof value === "string") return true;
+  return (
+    isObject(value) &&
+    typeof value.tool_id === "string" &&
+    (value.name === undefined || typeof value.name === "string") &&
+    isOptionalString(value.fingerprint) &&
+    (value.risk_class === undefined || isToolRiskClass(value.risk_class)) &&
+    (value.review_required === undefined || typeof value.review_required === "boolean")
+  );
+}
+
+function isMcpRegistration(value: unknown): value is McpRegistration {
+  return (
+    isObject(value) &&
+    typeof value.mcp_id === "string" &&
+    typeof value.org_id === "string" &&
+    isToolSource(value.source) &&
+    isMcpTransport(value.transport) &&
+    isOptionalMetadata(value.endpoint_metadata) &&
+    isOptionalMetadata(value.command_metadata) &&
+    isStringArray(value.allowed_origins) &&
+    isStringArray(value.required_secret_handles) &&
+    isNullableString(value.tool_fingerprint) &&
+    Array.isArray(value.tool_list) &&
+    value.tool_list.every(isMcpToolEntry) &&
+    isMcpPolicyStatus(value.policy_status) &&
+    isPositiveInteger(value.version) &&
+    isOptionalString(value.created_by_user_id) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isMcpRegistrationPage(value: unknown): value is Page<McpRegistration> {
+  return isPage(value, isMcpRegistration);
+}
+
+function isExternalSubmitDecision(value: unknown): value is ExternalSubmitDecision {
+  return value === "deny" || value === "allow" || value === "require_approval";
+}
+
+function isBrowserPolicy(value: unknown): value is BrowserPolicy {
+  return (
+    isObject(value) &&
+    isStringArray(value.allowed_domains) &&
+    isStringArray(value.blocked_domains) &&
+    typeof value.allow_download === "boolean" &&
+    typeof value.allow_upload === "boolean" &&
+    typeof value.allow_authenticated === "boolean" &&
+    typeof value.allow_clipboard === "boolean" &&
+    isExternalSubmitDecision(value.external_submit)
+  );
+}
+
+function isComputerPolicy(value: unknown): value is ComputerPolicy {
+  return (
+    isObject(value) &&
+    typeof value.allow_accessibility === "boolean" &&
+    typeof value.allow_screen_capture === "boolean" &&
+    typeof value.allow_keyboard_mouse === "boolean" &&
+    typeof value.allow_shell_escalation === "boolean" &&
+    isStringArray(value.allowed_applications) &&
+    (value.blocked_applications === undefined || isStringArray(value.blocked_applications))
+  );
+}
+
+function isToolPolicyRule(value: unknown): value is ToolPolicyRule {
+  return (
+    isObject(value) &&
+    typeof value.tool_id === "string" &&
+    isOptionalString(value.capability_id) &&
+    isToolDecision(value.decision) &&
+    (value.argument_scope === undefined || isStringArray(value.argument_scope))
+  );
+}
+
+function isToolPolicyEntry(value: unknown): value is ToolPolicyEntry {
+  return (
+    isObject(value) &&
+    typeof value.tool_id === "string" &&
+    isToolDecision(value.decision) &&
+    isOptionalString(value.fingerprint) &&
+    (value.review_required === undefined || typeof value.review_required === "boolean")
+  );
+}
+
+function isToolDecisionMap(value: unknown): value is Record<string, ToolDecision> {
+  if (!isObject(value)) return false;
+  return Object.entries(value).every(
+    ([key, decision]) => key.length > 0 && isToolDecision(decision),
+  );
+}
+
+function isToolPolicyDocument(value: unknown): value is ToolPolicyDocument {
+  return (
+    isObject(value) &&
+    value.schema_version === 1 &&
+    isToolDecision(value.default_posture) &&
+    isStringArray(value.tool_ids) &&
+    isStringArray(value.mcp_ids) &&
+    (value.rules === undefined ||
+      (Array.isArray(value.rules) && value.rules.every(isToolPolicyRule))) &&
+    (value.tool_decisions === undefined || isToolDecisionMap(value.tool_decisions)) &&
+    (value.entries === undefined ||
+      (Array.isArray(value.entries) && value.entries.every(isToolPolicyEntry))) &&
+    isBrowserPolicy(value.browser) &&
+    isComputerPolicy(value.computer)
+  );
+}
+
+function isToolPolicy(value: unknown): value is ToolPolicy {
+  return (
+    isObject(value) &&
+    isOptionalString(value.tool_policy_id) &&
+    isNullableString(value.org_id) &&
+    isOptionalString(value.project_id) &&
+    isNonNegativeInteger(value.policy_version) &&
+    isNonNegativeInteger(value.version) &&
+    isToolPolicyDocument(value.document) &&
+    (value.policy_state === undefined ||
+      value.policy_state === "ok" ||
+      value.policy_state === "missing" ||
+      value.policy_state === "schema_unsupported") &&
+    isOptionalString(value.created_at) &&
+    isOptionalString(value.updated_at) &&
+    isOptionalString(value.expires_at)
+  );
+}
+
+function isApprovalStatus(value: unknown): value is ApprovalStatus {
+  return (
+    value === "pending" ||
+    value === "approved" ||
+    value === "denied" ||
+    value === "expired" ||
+    value === "cancelled"
+  );
+}
+
+function isApprovalMode(value: unknown): value is ApprovalMode {
+  return value === "session" || value === "per_use";
+}
+
+function isApproval(value: unknown): value is ApprovalRequest {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.project_id === "string" &&
+    typeof value.run_id === "string" &&
+    isOptionalString(value.agent_session_id) &&
+    typeof value.tool_call_id === "string" &&
+    typeof value.tool_id === "string" &&
+    isNullableString(value.tool_fingerprint) &&
+    isToolRiskClass(value.risk_class) &&
+    isApprovalMode(value.approval_mode) &&
+    isApprovalStatus(value.status) &&
+    typeof value.arguments_summary === "string" &&
+    isOptionalString(value.arguments_hash) &&
+    isOptionalString(value.policy_snapshot_id) &&
+    isOptionalPositiveInteger(value.policy_version) &&
+    isOptionalString(value.requested_by_device_id) &&
+    isNullableString(value.requested_by_principal_id) &&
+    typeof value.requested_at === "string" &&
+    typeof value.expires_at === "string" &&
+    isNullableString(value.resolved_by_principal_id) &&
+    isNullableString(value.resolved_at) &&
+    isNullableString(value.resolution_reason) &&
+    (value.decision === undefined ||
+      value.decision === null ||
+      isApprovalDecision(value.decision)) &&
+    isOptionalString(value.consumed_at) &&
+    isOptionalString(value.consumed_by_device_id) &&
+    isPositiveInteger(value.version)
+  );
+}
+
+function isApprovalDecision(value: unknown): value is ApprovalDecision {
+  return value === "approved" || value === "denied";
+}
+
+function isApprovalPage(value: unknown): value is Page<ApprovalRequest> {
+  return isPage(value, isApproval);
+}
+
+function isToolDecisionResponse(value: unknown): value is ToolDecisionResponse {
+  return (
+    isObject(value) &&
+    isToolDecision(value.decision) &&
+    isOptionalString(value.approval_id) &&
+    isNonNegativeInteger(value.policy_version)
+  );
+}
+
+function isUsageSource(value: unknown): value is UsageSource {
+  return value === "inference" || value === "run";
+}
+
+function isUsageReconciliationStatus(value: unknown): value is UsageReconciliationStatus {
+  return (
+    value === "recorded" || value === "pending" || value === "reconciled" || value === "conflict"
+  );
+}
+
+function isUsageEvent(value: unknown): value is UsageEvent {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    isOptionalString(value.usage_event_id) &&
+    isNullableString(value.request_id) &&
+    typeof value.org_id === "string" &&
+    isNullableString(value.project_id) &&
+    isNullableString(value.run_id) &&
+    typeof value.principal_user_id === "string" &&
+    isNullableString(value.session_id) &&
+    isNullableString(value.device_id) &&
+    isUsageSource(value.source) &&
+    isNullableString(value.external_id) &&
+    isUsageReconciliationStatus(value.reconciliation_status) &&
+    isNullableString(value.model_alias) &&
+    isOptionalString(value.route_version_id) &&
+    isOptionalString(value.provider_id) &&
+    isOptionalString(value.model_id) &&
+    isOptionalNullableNonNegativeInteger(value.input_tokens) &&
+    isOptionalNullableNonNegativeInteger(value.output_tokens) &&
+    isOptionalNullableNonNegativeInteger(value.cached_tokens) &&
+    isOptionalMetadata(value.provider_usage) &&
+    (value.estimated_cost_minor === null || isNonNegativeInteger(value.estimated_cost_minor)) &&
+    (value.actual_cost_minor === null || isNonNegativeInteger(value.actual_cost_minor)) &&
+    isNullableString(value.currency) &&
+    isNullableString(value.pricing_version) &&
+    typeof value.budget_decision === "string" &&
+    isOptionalNullableNonNegativeInteger(value.ttft_ms) &&
+    isOptionalNullableNonNegativeInteger(value.total_latency_ms) &&
+    typeof value.created_at === "string" &&
+    (value.reconciliation_state === undefined ||
+      isUsageReconciliationStatus(value.reconciliation_state)) &&
+    isOptionalString(value.reconciled_at) &&
+    isOptionalString(value.denial_code) &&
+    isOptionalString(value.credential_id) &&
+    isOptionalString(value.agent_session_id)
+  );
+}
+
+function isUsageEventPage(value: unknown): value is Page<UsageEvent> {
+  return isPage(value, isUsageEvent);
+}
+
+function isUsageSummary(value: unknown): value is UsageSummary {
+  return (
+    isObject(value) &&
+    typeof value.org_id === "string" &&
+    isNullableString(value.project_id) &&
+    isNullableString(value.run_id) &&
+    isNullableString(value.from) &&
+    isNullableString(value.to) &&
+    isNonNegativeInteger(value.event_count) &&
+    isNonNegativeInteger(value.input_tokens) &&
+    isNonNegativeInteger(value.output_tokens) &&
+    isNonNegativeInteger(value.cached_tokens) &&
+    isNonNegativeInteger(value.cost_minor)
+  );
+}
+
+function isUsageRollup(value: unknown): value is UsageRollup {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.org_id === "string" &&
+    isNullableString(value.project_id) &&
+    isNullableString(value.principal_user_id) &&
+    isNullableString(value.model_alias) &&
+    typeof value.bucket_start === "string" &&
+    typeof value.bucket_end === "string" &&
+    isNonNegativeInteger(value.input_tokens) &&
+    isNonNegativeInteger(value.output_tokens) &&
+    isNonNegativeInteger(value.cached_tokens) &&
+    isNonNegativeInteger(value.cost_minor) &&
+    isNonNegativeInteger(value.usage_event_count) &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isUsageRollupPage(value: unknown): value is Page<UsageRollup> {
+  return isPage(value, isUsageRollup);
+}
+
+function isCalculationKind(value: unknown): value is CostRecord["calculation_kind"] {
+  return value === "estimated" || value === "actual" || value === "recalculated";
+}
+
+function isCostRecord(value: unknown): value is CostRecord {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.usage_event_id === "string" &&
+    typeof value.org_id === "string" &&
+    isNullableString(value.project_id) &&
+    isNullableString(value.run_id) &&
+    typeof value.pricing_source === "string" &&
+    typeof value.pricing_version === "string" &&
+    typeof value.pricing_effective_at === "string" &&
+    isCalculationKind(value.calculation_kind) &&
+    (value.input_tokens === null || isNonNegativeInteger(value.input_tokens)) &&
+    (value.output_tokens === null || isNonNegativeInteger(value.output_tokens)) &&
+    (value.cached_tokens === null || isNonNegativeInteger(value.cached_tokens)) &&
+    isNonNegativeInteger(value.cost_minor) &&
+    typeof value.currency === "string" &&
+    typeof value.created_at === "string" &&
+    isOptionalString(value.recalculated_from_cost_record_id)
+  );
+}
+
+function isUsageReconciliationResponse(value: unknown): value is UsageReconciliationResponse {
+  return (
+    isObject(value) &&
+    isUsageEvent(value.usage_event) &&
+    (value.cost_record === null || isCostRecord(value.cost_record))
+  );
+}
+
+function isBudgetScopeType(value: unknown): value is BudgetScopeType {
+  return (
+    value === "organization" ||
+    value === "project" ||
+    value === "user" ||
+    value === "service_account" ||
+    value === "model_alias"
+  );
+}
+
+function isBudgetLifecycle(value: unknown): value is BudgetLifecycle {
+  return value === "active" || value === "paused" || value === "archived" || value === "disabled";
+}
+
+function isBudgetState(value: unknown): value is BudgetState {
+  return (
+    value === "active" ||
+    value === "paused" ||
+    value === "archived" ||
+    value === "disabled" ||
+    value === "unavailable"
+  );
+}
+
+function isBudget(value: unknown): value is Budget {
+  return (
+    isObject(value) &&
+    typeof value.budget_id === "string" &&
+    typeof value.org_id === "string" &&
+    isBudgetScopeType(value.scope_type) &&
+    isNullableString(value.scope_id) &&
+    typeof value.period_start === "string" &&
+    typeof value.period_end === "string" &&
+    isNonNegativeInteger(value.limit_minor) &&
+    (value.spent_minor === undefined ||
+      value.spent_minor === null ||
+      isNonNegativeInteger(value.spent_minor)) &&
+    (value.used_minor === undefined ||
+      value.used_minor === null ||
+      isNonNegativeInteger(value.used_minor)) &&
+    (value.reserved_minor === undefined ||
+      value.reserved_minor === null ||
+      isNonNegativeInteger(value.reserved_minor)) &&
+    isNullableString(value.currency) &&
+    typeof value.hard === "boolean" &&
+    isBudgetLifecycle(value.lifecycle) &&
+    isBudgetState(value.state) &&
+    isPositiveInteger(value.version) &&
+    isOptionalString(value.created_at) &&
+    isNullableString(value.updated_at)
+  );
+}
+
+function isBudgetPage(value: unknown): value is Page<Budget> {
+  return isPage(value, isBudget);
+}
+
+function isBudgetReservation(value: unknown): value is BudgetReservation {
+  return (
+    isObject(value) &&
+    typeof value.reservation_id === "string" &&
+    typeof value.request_id === "string" &&
+    isNullableString(value.run_id) &&
+    typeof value.org_id === "string" &&
+    isNullableString(value.budget_id) &&
+    isNonNegativeInteger(value.reserved_minor) &&
+    (value.committed_minor === undefined ||
+      value.committed_minor === null ||
+      isNonNegativeInteger(value.committed_minor)) &&
+    (value.status === "reserved" ||
+      value.status === "committed" ||
+      value.status === "released" ||
+      value.status === "expired" ||
+      value.status === "failed") &&
+    isNullableString(value.currency) &&
+    typeof value.expires_at === "string" &&
+    isNullableString(value.reconciled_at) &&
+    typeof value.created_at === "string" &&
+    isOptionalString(value.updated_at)
+  );
+}
+
+function isBudgetReservationPage(value: unknown): value is Page<BudgetReservation> {
+  return isPage(value, isBudgetReservation);
+}
+
+function isRateLimitStatus(value: unknown): value is RateLimitStatus {
+  return (
+    value === "healthy" ||
+    value === "rate_limited" ||
+    value === "degraded" ||
+    value === "unhealthy" ||
+    value === "unknown"
+  );
+}
+
+function normalizeRateLimitStatus(value: unknown): RateLimitStatus | undefined {
+  if (value === "disabled") return "unknown";
+  return isRateLimitStatus(value) ? value : undefined;
+}
+
+function normalizeRateLimitPolicy(value: unknown): RateLimitPolicy | undefined {
+  if (!isObject(value)) return undefined;
+  const status = normalizeRateLimitStatus(value.status);
+  if (
+    typeof value.rate_limit_policy_id !== "string" ||
+    typeof value.org_id !== "string" ||
+    !isBudgetScopeType(value.scope_type) ||
+    !isNullableString(value.scope_id) ||
+    !isOptionalNullableNonNegativeInteger(value.requests_per_minute) ||
+    !isOptionalNullableNonNegativeInteger(value.tokens_per_minute) ||
+    !isOptionalNullableNonNegativeInteger(value.max_concurrent_requests) ||
+    !isStringArray(value.applicable_model_aliases) ||
+    status === undefined ||
+    !isPositiveInteger(value.version) ||
+    !isOptionalString(value.updated_at) ||
+    (value.enabled !== undefined && typeof value.enabled !== "boolean") ||
+    !isOptionalString(value.created_at)
+  ) {
+    return undefined;
+  }
+  return {
+    rate_limit_policy_id: value.rate_limit_policy_id,
+    org_id: value.org_id,
+    scope_type: value.scope_type,
+    scope_id: value.scope_id,
+    requests_per_minute: value.requests_per_minute ?? null,
+    tokens_per_minute: value.tokens_per_minute ?? null,
+    max_concurrent_requests: value.max_concurrent_requests ?? null,
+    applicable_model_aliases: value.applicable_model_aliases,
+    status,
+    version: value.version,
+    updated_at: value.updated_at ?? null,
+    ...(value.enabled === undefined ? {} : { enabled: value.enabled }),
+    ...(value.created_at === undefined ? {} : { created_at: value.created_at }),
+  };
+}
+
+function normalizeRateLimitPolicyPage(value: unknown): Page<RateLimitPolicy> | undefined {
+  if (!isObject(value) || !Array.isArray(value.items)) return undefined;
+  if (value.next_cursor !== null && typeof value.next_cursor !== "string") return undefined;
+  if (typeof value.has_more !== "boolean") return undefined;
+  const items: RateLimitPolicy[] = [];
+  for (const item of value.items) {
+    const normalized = normalizeRateLimitPolicy(item);
+    if (!normalized) return undefined;
+    items.push(normalized);
+  }
+  return { items, next_cursor: value.next_cursor, has_more: value.has_more };
+}
+
+function isUsageDenialLimitType(value: unknown): value is UsageDenialLimitType {
+  return (
+    value === "budget" ||
+    value === "rate_limit" ||
+    value === "concurrency" ||
+    value === "policy" ||
+    value === "unknown"
+  );
+}
+
+function normalizeUsageDenial(value: unknown, orgId: string): UsageDenial | undefined {
+  if (!isObject(value)) return undefined;
+  const id =
+    typeof value.id === "string"
+      ? value.id
+      : typeof value.denial_id === "string"
+        ? value.denial_id
+        : undefined;
+  const createdAt = typeof value.created_at === "string" ? value.created_at : undefined;
+  if (!id || !createdAt) return undefined;
+
+  const requestId = nullableText(value.request_id);
+  const runId = nullableText(value.run_id);
+  const projectId = nullableText(value.project_id);
+  const scopeId = nullableText(value.scope_id);
+  const modelAlias = nullableText(value.model_alias);
+  const resourceType = nullableText(value.resource_type);
+  const resourceId = nullableText(value.resource_id);
+  const reason = nullableText(value.reason);
+  const code =
+    typeof value.code === "string" && value.code.length > 0
+      ? value.code
+      : (reason ?? "request_denied");
+  const limitType =
+    value.limit_type === undefined
+      ? inferUsageDenialLimitType(code)
+      : isUsageDenialLimitType(value.limit_type)
+        ? value.limit_type
+        : undefined;
+  if (!limitType) return undefined;
+  const retryAfter =
+    value.retry_after_seconds === undefined || value.retry_after_seconds === null
+      ? null
+      : isNonNegativeInteger(value.retry_after_seconds)
+        ? value.retry_after_seconds
+        : undefined;
+  if (retryAfter === undefined) return undefined;
+  const scopeType =
+    value.scope_type === undefined || value.scope_type === null
+      ? null
+      : isBudgetScopeType(value.scope_type)
+        ? value.scope_type
+        : undefined;
+  if (scopeType === undefined) return undefined;
+
+  return {
+    id,
+    denial_id: id,
+    org_id: typeof value.org_id === "string" ? value.org_id : orgId,
+    code,
+    action: typeof value.action === "string" ? value.action : "request_denied",
+    resource_type: resourceType,
+    resource_id: resourceId,
+    outcome: typeof value.outcome === "string" ? value.outcome : "denied",
+    reason,
+    request_id: requestId,
+    correlation_id: nullableText(value.correlation_id),
+    run_id: runId,
+    agent_session_id: nullableText(value.agent_session_id),
+    project_id: projectId,
+    scope_type: scopeType,
+    scope_id: scopeId,
+    model_alias: modelAlias,
+    limit_type: limitType,
+    retry_after_seconds: retryAfter,
+    created_at: createdAt,
+  };
+}
+
+function normalizeUsageDenialPage(value: unknown, orgId: string): Page<UsageDenial> | undefined {
+  if (!isObject(value) || !Array.isArray(value.items)) return undefined;
+  if (value.next_cursor !== null && typeof value.next_cursor !== "string") return undefined;
+  if (typeof value.has_more !== "boolean") return undefined;
+  const items: UsageDenial[] = [];
+  for (const item of value.items) {
+    const normalized = normalizeUsageDenial(item, orgId);
+    if (!normalized) return undefined;
+    items.push(normalized);
+  }
+  return { items, next_cursor: value.next_cursor, has_more: value.has_more };
+}
+
+function nullableText(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function inferUsageDenialLimitType(code: string): UsageDenialLimitType {
+  if (code === "concurrency_limit_exceeded") return "concurrency";
+  if (code === "rate_limit_exceeded" || code === "rate_limit_state_unavailable")
+    return "rate_limit";
+  if (code === "budget_exceeded" || code === "budget_state_unavailable") return "budget";
+  if (code.includes("policy") || code.includes("tool") || code.includes("approval"))
+    return "policy";
+  return "unknown";
 }

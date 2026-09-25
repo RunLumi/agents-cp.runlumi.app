@@ -129,7 +129,7 @@ fn grant_json(grant: &ProjectGrantRecord) -> Value {
 
 /// Resolve a project the caller may read: org visibility is open to active
 /// members; restricted projects need an explicit grant or `projects.manage`.
-async fn readable_project(
+pub(crate) async fn readable_project(
     state: &Arc<AppState>,
     context: &RequestContext,
     org_id: &str,
