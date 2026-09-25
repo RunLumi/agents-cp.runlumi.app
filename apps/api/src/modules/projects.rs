@@ -76,15 +76,28 @@ pub fn validate_project_name(name: &str) -> Result<String, CoreError> {
 /// Slug: lowercase letters, digits, and hyphens; bounded; at least one
 /// alphanumeric character so it stays URL-presentable.
 pub fn normalize_project_slug(slug: &str) -> Result<String, CoreError> {
-    let normalized = slug.trim().to_ascii_lowercase();
+    // Fold whitespace/underscore runs into single hyphens, lowercase, and
+    // trim leading/trailing dashes so names like "Project P" derive clean
+    // URL-presentable slugs.
+    let mut normalized = String::new();
+    let mut last_was_dash = true; // suppress leading dashes
+    for character in slug.trim().to_ascii_lowercase().chars() {
+        if character.is_ascii_alphanumeric() {
+            normalized.push(character);
+            last_was_dash = false;
+        } else if (character.is_whitespace() || character == '_' || character == '-')
+            && !last_was_dash
+        {
+            normalized.push('-');
+            last_was_dash = true;
+        }
+    }
+    while normalized.ends_with('-') {
+        normalized.pop();
+    }
     let ok = !normalized.is_empty()
         && normalized.chars().count() <= MAX_PROJECT_SLUG_LEN
-        && normalized
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        && normalized.bytes().any(|byte| byte.is_ascii_alphanumeric())
-        && !normalized.starts_with('-')
-        && !normalized.ends_with('-');
+        && normalized.bytes().any(|byte| byte.is_ascii_alphanumeric());
     if ok {
         Ok(normalized)
     } else {
@@ -142,9 +155,12 @@ mod tests {
             normalize_project_slug("  Inference-2 ").unwrap(),
             "inference-2"
         );
-        assert!(normalize_project_slug("-leading").is_err());
-        assert!(normalize_project_slug("trailing-").is_err());
-        assert!(normalize_project_slug("under_score").is_err());
+        assert_eq!(normalize_project_slug("-leading").unwrap(), "leading");
+        assert_eq!(normalize_project_slug("trailing-").unwrap(), "trailing");
+        assert_eq!(
+            normalize_project_slug("under_score").unwrap(),
+            "under-score"
+        );
         assert!(normalize_project_slug("").is_err());
         assert!(normalize_project_slug(&"x".repeat(80)).is_err());
     }

@@ -46,10 +46,17 @@ INSERT INTO devices (
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active', ?9, ?9)
 "#;
 
+const APPROVE_ENROLLMENT_SQL: &str = r#"
+UPDATE device_enrollments
+SET approved_by_user_id = ?3, device_id = ?4, updated_at = ?5
+WHERE enrollment_id = ?1 AND org_id = ?2 AND status = 'pending' AND expires_at > ?5
+"#;
+
 const COMPLETE_ENROLLMENT_SQL: &str = r#"
 UPDATE device_enrollments
-SET status = 'completed', challenge = NULL, device_id = ?2, approved_by_user_id = ?3, updated_at = ?4
-WHERE enrollment_id = ?1 AND status = 'pending' AND expires_at > ?4
+SET status = 'completed', device_id = ?2, updated_at = ?3
+WHERE enrollment_id = ?1 AND status = 'pending'
+  AND approved_by_user_id IS NOT NULL AND expires_at > ?3
 "#;
 
 const INSERT_DEVICE_TOKEN_SQL: &str = r#"
@@ -249,6 +256,75 @@ impl<'a> DeviceRepository<'a> {
         )?;
         let result = statement.run().await?;
         Ok(D1Adapter::changes(&result)? > 0)
+    }
+
+    /// Approve a pending enrollment: record the approver (releasing the
+    /// proof challenge) and insert the managed device row in one batch. The
+    /// device proves possession separately at the complete endpoint.
+    pub fn approve_enrollment_statements(
+        &self,
+        enrollment: &DeviceEnrollmentRecord,
+        device_id: &str,
+        approved_by_user_id: &str,
+        now: &Timestamp,
+    ) -> worker::Result<Vec<D1PreparedStatement>> {
+        let approve = self.database.prepare(
+            APPROVE_ENROLLMENT_SQL,
+            &[
+                BindValue::Text(&enrollment.enrollment_id),
+                BindValue::Text(&enrollment.org_id),
+                BindValue::Text(approved_by_user_id),
+                BindValue::Text(device_id),
+                BindValue::Text(now.as_str()),
+            ],
+        )?;
+        let insert_device = self.database.prepare(
+            INSERT_DEVICE_SQL,
+            &[
+                BindValue::Text(device_id),
+                BindValue::Text(&enrollment.org_id),
+                BindValue::Text(approved_by_user_id),
+                BindValue::Text(&enrollment.device_name),
+                BindValue::Text(&enrollment.platform),
+                BindValue::Text(&enrollment.app_version),
+                BindValue::Text(&enrollment.public_key),
+                BindValue::Text(&enrollment.key_fingerprint),
+                BindValue::Text(now.as_str()),
+            ],
+        )?;
+        // Insert the device first: SQLite foreign keys are immediate, so the
+        // enrollment's device_id reference needs its row to exist up front.
+        Ok(vec![insert_device, approve])
+    }
+
+    /// Complete an approved enrollment after proof verification: close the
+    /// enrollment and store the first device token in one batch.
+    pub fn complete_enrollment_statements(
+        &self,
+        enrollment_id: &str,
+        device_id: &str,
+        token_hash: &str,
+        token_expires_at: &str,
+        now: &Timestamp,
+    ) -> worker::Result<Vec<D1PreparedStatement>> {
+        let close = self.database.prepare(
+            COMPLETE_ENROLLMENT_SQL,
+            &[
+                BindValue::Text(enrollment_id),
+                BindValue::Text(device_id),
+                BindValue::Text(now.as_str()),
+            ],
+        )?;
+        let insert_token = self.database.prepare(
+            INSERT_DEVICE_TOKEN_SQL,
+            &[
+                BindValue::Text(token_hash),
+                BindValue::Text(device_id),
+                BindValue::Text(token_expires_at),
+                BindValue::Text(now.as_str()),
+            ],
+        )?;
+        Ok(vec![close, insert_token])
     }
 
     /// Atomically complete an approved enrollment: insert the managed device,

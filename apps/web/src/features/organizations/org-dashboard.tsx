@@ -11,6 +11,9 @@ import {
   IconX,
 } from "@/components/icons";
 import { AccountPanel as AccountSecurityPanel } from "@/features/account/account-panel";
+import { DevicesPanel } from "@/features/devices/devices-panel";
+import { PolicyPanel } from "@/features/policy/policy-panel";
+import { ProjectsPanel } from "@/features/projects/projects-panel";
 import {
   changeMemberRole,
   createOrganization,
@@ -33,12 +36,15 @@ interface OrgDashboardProps {
   onOrganizationsChanged: () => void;
 }
 
-type Section = "overview" | "members" | "teams" | "account";
+type Section = "overview" | "members" | "teams" | "projects" | "devices" | "policy" | "account";
 
 const sections: { id: Section; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: "overview", label: "Overview", icon: IconHome },
   { id: "members", label: "Members", icon: IconUsers },
   { id: "teams", label: "Teams", icon: IconUsersGroup },
+  { id: "projects", label: "Projects", icon: IconHome },
+  { id: "devices", label: "Devices", icon: IconUsers },
+  { id: "policy", label: "Policy", icon: IconShieldLock },
   { id: "account", label: "Account security", icon: IconShieldLock },
 ];
 
@@ -62,6 +68,7 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
     () => me.organizations.find((organization) => organization.organization.org_id === selectedId),
     [me.organizations, selectedId],
   );
+  const canManage = selected?.role === "owner" || selected?.role === "admin";
   const pathSlug = window.location.pathname.match(/^\/org\/([^/]+)/)?.[1];
   const unauthorizedPath = Boolean(
     pathSlug && !me.organizations.some((item) => item.organization.slug === pathSlug),
@@ -341,6 +348,13 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                     onClose={() => setShowCreateTeam(false)}
                   />
                 ) : null}
+                {section === "projects" ? (
+                  <ProjectsPanel orgId={load.organization.org_id} canManage={canManage} />
+                ) : null}
+                {section === "devices" ? (
+                  <DevicesPanel orgId={load.organization.org_id} currentUserId={me.user.id} />
+                ) : null}
+                {section === "policy" ? <PolicyPanel orgId={load.organization.org_id} /> : null}
                 {section === "account" ? <AccountSecurityPanel me={me} /> : null}
               </>
             )}
