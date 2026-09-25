@@ -57,6 +57,18 @@ const AutomationPanel = lazy(() =>
   })),
 );
 
+const WebhooksPanel = lazy(() =>
+  import("@/features/webhooks/webhooks-panel").then((module) => ({
+    default: module.WebhooksPanel,
+  })),
+);
+
+const NotificationPreferences = lazy(() =>
+  import("@/features/notifications/notification-preferences").then((module) => ({
+    default: module.NotificationPreferences,
+  })),
+);
+
 const UsageBudgetsPanel = lazy(() =>
   import("@/features/usage/usage-budgets-panel").then((module) => ({
     default: module.UsageBudgetsPanel,
@@ -440,6 +452,19 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                       canManage={canManage}
                       canRun={canRun}
                     />
+                  </Suspense>
+                ) : null}
+                {section === "webhooks" ? (
+                  <Suspense fallback={<LoadingPanel label="Loading webhooks…" />}>
+                    <div className="space-y-6">
+                      <WebhooksPanel orgId={load.organization.org_id} />
+                      {/* F17 preferences are informational only: a mandatory
+                          security notification stays visible regardless, and the
+                          panel says so rather than implying it can be silenced. */}
+                      <NotificationPreferences
+                        scope={{ kind: "org", orgId: load.organization.org_id }}
+                      />
+                    </div>
                   </Suspense>
                 ) : null}
                 {section === "runs" || section === "tools" || section === "usage" ? (
