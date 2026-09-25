@@ -49,6 +49,14 @@ const RunsPanel = lazy(() =>
 const ToolsPanel = lazy(() =>
   import("@/features/tools/tools-panel").then((module) => ({ default: module.ToolsPanel })),
 );
+// P06 panels are lazy like every other substantive surface, so the initial
+// route chunk is unaffected by the four new sections.
+const AutomationPanel = lazy(() =>
+  import("@/features/automations/automation-panel").then((module) => ({
+    default: module.AutomationPanel,
+  })),
+);
+
 const UsageBudgetsPanel = lazy(() =>
   import("@/features/usage/usage-budgets-panel").then((module) => ({
     default: module.UsageBudgetsPanel,
@@ -72,6 +80,10 @@ type Section =
   | "devices"
   | "policy"
   | "models"
+  | "automations"
+  | "webhooks"
+  | "billing"
+  | "data"
   | "account";
 
 const sections: { id: Section; label: string; icon: ComponentType<{ className?: string }> }[] = [
@@ -85,6 +97,12 @@ const sections: { id: Section; label: string; icon: ComponentType<{ className?: 
   { id: "usage", label: "Usage & budgets", icon: IconRoute },
   { id: "devices", label: "Devices", icon: IconUsers },
   { id: "policy", label: "Policy", icon: IconShieldLock },
+  // P06 durable operations. Automations sits next to runs because an automation
+  // is a scheduled way to start one; the rest are organization configuration.
+  { id: "automations", label: "Automations", icon: IconRun },
+  { id: "webhooks", label: "Webhooks & alerts", icon: IconToolShield },
+  { id: "billing", label: "Plan & usage", icon: IconRoute },
+  { id: "data", label: "Data & retention", icon: IconShieldLock },
   { id: "account", label: "Account security", icon: IconShieldLock },
 ];
 
@@ -106,6 +124,10 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
       path === "devices" ||
       path === "policy" ||
       path === "models" ||
+      path === "automations" ||
+      path === "webhooks" ||
+      path === "billing" ||
+      path === "data" ||
       path === "account"
       ? path
       : "overview";
@@ -123,6 +145,12 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
     [me.organizations, selectedId],
   );
   const canManage = selected?.role === "owner" || selected?.role === "admin";
+  // P06-CG grants `automations.run` to members as well as admins, so this is
+  // deliberately WIDER than `canManage`. A viewer is read-only on every P06
+  // surface. The server enforces the same matrix independently; this only
+  // avoids showing a control that would fail closed with a 403.
+  const canRun =
+    selected?.role === "owner" || selected?.role === "admin" || selected?.role === "member";
   const pathSlug = window.location.pathname.match(/^\/org\/([^/]+)/)?.[1];
   const unauthorizedPath = Boolean(
     pathSlug && !me.organizations.some((item) => item.organization.slug === pathSlug),
@@ -404,6 +432,15 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                 ) : null}
                 {section === "projects" ? (
                   <ProjectsPanel orgId={load.organization.org_id} canManage={canManage} />
+                ) : null}
+                {section === "automations" ? (
+                  <Suspense fallback={<LoadingPanel label="Loading automations…" />}>
+                    <AutomationPanel
+                      orgId={load.organization.org_id}
+                      canManage={canManage}
+                      canRun={canRun}
+                    />
+                  </Suspense>
                 ) : null}
                 {section === "runs" || section === "tools" || section === "usage" ? (
                   <Suspense fallback={<LoadingPanel label="Loading control surface…" />}>
