@@ -442,18 +442,22 @@ pub async fn enrollment_status(
     let status =
         EnrollmentStatus::parse(&enrollment.status).ok_or_else(|| service_unavailable(&context))?;
     let expired = enrollment.expires_at.as_str() <= context.received_at.as_str();
-    let wire_status = match (status, expired) {
-        (EnrollmentStatus::Pending, true) => {
+    // "approved" = a member approved this enrollment; the proof challenge is
+    // released to the device only at that point.
+    let approved = status == EnrollmentStatus::Pending && enrollment.approved_by_user_id.is_some();
+    let wire_status = match (status, expired, approved) {
+        (EnrollmentStatus::Pending, true, _) => {
             DeviceRepository::new(database)
                 .expire_enrollment(&enrollment_id, &context.received_at)
                 .await
                 .map_err(|_| service_unavailable(&context))?;
             "expired"
         }
-        (EnrollmentStatus::Pending, false) => "pending",
-        (EnrollmentStatus::Completed, _) => "approved",
-        (EnrollmentStatus::Expired, _) => "expired",
-        (EnrollmentStatus::Denied, _) => "denied",
+        (EnrollmentStatus::Pending, false, true) => "approved",
+        (EnrollmentStatus::Pending, false, false) => "pending",
+        (EnrollmentStatus::Completed, _, _) => "completed",
+        (EnrollmentStatus::Expired, _, _) => "expired",
+        (EnrollmentStatus::Denied, _, _) => "denied",
     };
     let challenge = if wire_status == "approved" {
         enrollment.challenge.clone()
@@ -505,7 +509,8 @@ pub async fn complete_enrollment(
                 "No such enrollment.",
             )
         })?;
-    if EnrollmentStatus::parse(&enrollment.status) != Some(EnrollmentStatus::Completed)
+    if EnrollmentStatus::parse(&enrollment.status) != Some(EnrollmentStatus::Pending)
+        || enrollment.approved_by_user_id.is_none()
         || enrollment.expires_at.as_str() <= context.received_at.as_str()
     {
         return Err(denial(
@@ -534,35 +539,34 @@ pub async fn complete_enrollment(
             "The device proof is invalid.",
         ));
     }
-    let device_id = generated_id("dvc");
+    let device_id = enrollment
+        .device_id
+        .clone()
+        .ok_or_else(|| service_unavailable(&context))?;
     let raw_token = new_secret();
     let token_hash = sha256_hex(&raw_token)
         .await
         .map_err(|_| service_unavailable(&context))?;
     let token_expires_at = add_seconds(&context.received_at, DEVICE_TOKEN_TTL_SECONDS)
         .map_err(|_| service_unavailable(&context))?;
-    let device = DeviceRepository::new(database)
-        .complete_enrollment(
-            &enrollment,
+    let statements = DeviceRepository::new(database)
+        .complete_enrollment_statements(
+            &enrollment_id,
             &device_id,
-            enrollment
-                .approved_by_user_id
-                .as_deref()
-                .unwrap_or_default(),
             &token_hash,
             token_expires_at.as_str(),
             &context.received_at,
         )
+        .map_err(|error| database_error(&context, error))?;
+    database
+        .batch(statements)
         .await
-        .map_err(|error| database_error(&context, error))?
-        .ok_or_else(|| {
-            denial(
-                &context,
-                ApiErrorCode::Conflict,
-                "enrollment_expired",
-                "The enrollment could not be completed.",
-            )
-        })?;
+        .map_err(|error| database_error(&context, error))?;
+    let device = DeviceRepository::new(database)
+        .find_device(&device_id)
+        .await
+        .map_err(|_| service_unavailable(&context))?
+        .ok_or_else(|| service_unavailable(&context))?;
     let policy_version = refresh_policy_snapshot(database, &context, &device.org_id, None).await?;
     Ok((
         StatusCode::CREATED,
@@ -1229,31 +1233,14 @@ pub async fn approve_enrollment(
         ));
     }
     let device_id = generated_id("dvc");
-    let raw_token = new_secret();
-    let token_hash = sha256_hex(&raw_token)
-        .await
-        .map_err(|_| service_unavailable(&context))?;
-    let token_expires_at = add_seconds(&context.received_at, DEVICE_TOKEN_TTL_SECONDS)
-        .map_err(|_| service_unavailable(&context))?;
-    let device = repository
-        .complete_enrollment(
+    let mut statements = repository
+        .approve_enrollment_statements(
             &enrollment,
             &device_id,
             access.principal.user_id.as_str(),
-            &token_hash,
-            token_expires_at.as_str(),
             &context.received_at,
         )
-        .await
-        .map_err(|error| database_error(&context, error))?
-        .ok_or_else(|| {
-            denial(
-                &context,
-                ApiErrorCode::Conflict,
-                "enrollment_expired",
-                "The enrollment expired before completion.",
-            )
-        })?;
+        .map_err(|error| database_error(&context, error))?;
     let event_id = generated_id("sec");
     let security_statement = security_event_statement(
         database,
@@ -1267,21 +1254,17 @@ pub async fn approve_enrollment(
         "success",
         &json!({ "enrollment_id": enrollment_id }),
     )?;
+    statements.push(security_statement);
     database
-        .batch(vec![security_statement])
+        .batch(statements)
         .await
         .map_err(|error| database_error(&context, error))?;
-    let policy_version = refresh_policy_snapshot(database, &context, org_id.as_str(), None).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({
-            "device": device_json(&device),
-            "device_token": raw_token,
-            "token_expires_at": token_expires_at,
-            "policy_version": policy_version,
-        })),
-    )
-        .into_response())
+    let device = DeviceRepository::new(database)
+        .find_device(&device_id)
+        .await
+        .map_err(|_| service_unavailable(&context))?
+        .ok_or_else(|| service_unavailable(&context))?;
+    Ok((StatusCode::CREATED, Json(json!({ "device": device_json(&device) }))).into_response())
 }
 
 #[worker::send]
