@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 
+import { LumiWordmark } from "@/components/brand";
 import { loginComplete, loginStart, signup, verifyEmail, type ChallengeResponse } from "@/lib/api";
 import { presentApiError } from "@/lib/errors";
 
@@ -68,12 +69,10 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
   return (
     <main className="grid min-h-dvh place-items-center bg-[var(--surface)] px-4 py-10 text-[var(--foreground)] sm:px-6">
-      <section className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-[var(--shadow)] sm:p-8">
+      <section className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-[var(--shadow)] sm:p-8">
         <div className="mb-8">
-          <p className="text-xs font-semibold tracking-[0.12em] text-[var(--lumi-blue)]">
-            LUMI AGENTS
-          </p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-[-0.03em]">
+          <LumiWordmark className="h-9 w-auto" />
+          <h1 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-[var(--civic-navy)]">
             {mode === "login" ? "Sign in to your workspace" : "Create your Lumi account"}
           </h1>
           <p className="mt-2 text-sm leading-6 text-[var(--muted-strong)]">
@@ -208,9 +207,9 @@ function Field({ label, id, children }: { label: string; id: string; children: R
 }
 
 const inputClass =
-  "min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus-visible:border-[var(--lumi-blue)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)]";
+  "min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus-visible:border-[var(--lumi-blue)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)]";
 const primaryClass =
-  "min-h-11 w-full rounded-lg bg-[var(--lumi-blue)] px-4 py-2 text-sm font-semibold text-white outline-none transition hover:bg-[var(--lumi-blue-hover)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-50";
+  "min-h-11 w-full rounded-lg bg-[var(--lumi-blue)] px-4 py-2 text-sm font-semibold text-white shadow-[var(--shadow-button)] outline-none transition hover:bg-[var(--lumi-blue-hover)] active:translate-y-px focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-50";
 
 function tabClass(active: boolean): string {
   return [

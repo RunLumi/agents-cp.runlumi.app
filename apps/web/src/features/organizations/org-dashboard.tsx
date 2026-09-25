@@ -1,5 +1,14 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ComponentType } from "react";
 
+import { LumiWordmark } from "@/components/brand";
+import {
+  IconHome,
+  IconLogout,
+  IconShieldLock,
+  IconUsers,
+  IconUsersGroup,
+  IconX,
+} from "@/components/icons";
 import { AccountPanel as AccountSecurityPanel } from "@/features/account/account-panel";
 import {
   changeMemberRole,
@@ -24,6 +33,14 @@ interface OrgDashboardProps {
 }
 
 type Section = "overview" | "members" | "teams" | "account";
+
+const sections: { id: Section; label: string; icon: ComponentType<{ className?: string }> }[] = [
+  { id: "overview", label: "Overview", icon: IconHome },
+  { id: "members", label: "Members", icon: IconUsers },
+  { id: "teams", label: "Teams", icon: IconUsersGroup },
+  { id: "account", label: "Account security", icon: IconShieldLock },
+];
+
 type LoadState =
   | { kind: "loading" }
   | { kind: "ready"; organization: Organization; members: Membership[]; teams: Team[] }
@@ -103,15 +120,13 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
 
   return (
     <div className="min-h-dvh bg-[var(--surface)] text-[var(--foreground)]">
-      <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-[color-mix(in_oklab,var(--panel)_94%,transparent)] backdrop-blur-xl">
-        <div className="mx-auto flex min-h-16 max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6">
-          <div className="flex min-w-0 items-center gap-4">
+      <header className="sticky top-0 z-20 px-3 pt-3 sm:px-5">
+        <div className="glass-surface mx-auto flex min-h-14 max-w-[1440px] items-center justify-between gap-3 rounded-2xl py-2 pl-3 pr-2 sm:pl-4 sm:pr-2.5">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <div className="flex shrink-0 items-center gap-2">
-              <div className="grid size-8 place-items-center rounded-lg bg-[var(--civic-navy)] text-sm font-semibold text-white">
-                L
-              </div>
-              <span className="hidden text-sm font-semibold tracking-[-0.01em] sm:inline">
-                Lumi Agents
+              <LumiWordmark className="h-7 w-auto" />
+              <span className="hidden text-sm font-semibold tracking-[-0.01em] text-[var(--civic-navy)] sm:inline">
+                Agents
               </span>
             </div>
             {me.organizations.length > 0 ? (
@@ -145,39 +160,54 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
           <div className="flex items-center gap-2">
             <span className="hidden text-xs text-[var(--muted)] sm:inline">{me.user.email}</span>
             <button type="button" onClick={onSignOut} className={secondaryButton}>
+              <IconLogout className="size-4" />
               Sign out
             </button>
           </div>
         </div>
       </header>
 
+      <div className="px-3 pt-3 md:hidden">
+        <nav aria-label="Organization sections">
+          <ul className="glass-surface flex items-center gap-1 overflow-x-auto rounded-[14px] p-1">
+            {sections.map(({ id, label, icon: Icon }) => (
+              <li key={id}>
+                <button
+                  type="button"
+                  onClick={() => navigate(id)}
+                  aria-current={section === id ? "page" : undefined}
+                  className={[
+                    "flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-[10px] px-3 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
+                    section === id
+                      ? "bg-[var(--panel)] font-semibold text-[var(--lumi-blue)] shadow-[var(--shadow)]"
+                      : "text-[var(--muted-strong)] hover:text-[var(--foreground)]",
+                  ].join(" ")}
+                >
+                  <Icon className="size-[18px]" />
+                  {label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </div>
+
       <div className="mx-auto grid max-w-[1440px] grid-cols-1 md:grid-cols-[232px_minmax(0,1fr)]">
-        <aside className="hidden min-h-[calc(100dvh-4rem)] border-r border-[var(--border)] px-3 py-5 md:block">
+        <aside className="hidden min-h-[calc(100dvh-4.25rem)] border-r border-[var(--border)] px-3 py-5 md:block">
           <nav aria-label="Organization navigation">
             <p className="mb-3 px-3 text-[11px] font-semibold tracking-[0.1em] text-[var(--muted)]">
               WORKSPACE
             </p>
             <ul className="space-y-1">
-              <NavButton
-                label="Overview"
-                active={section === "overview"}
-                onClick={() => navigate("overview")}
-              />
-              <NavButton
-                label="Members"
-                active={section === "members"}
-                onClick={() => navigate("members")}
-              />
-              <NavButton
-                label="Teams"
-                active={section === "teams"}
-                onClick={() => navigate("teams")}
-              />
-              <NavButton
-                label="Account security"
-                active={section === "account"}
-                onClick={() => navigate("account")}
-              />
+              {sections.map(({ id, label, icon: Icon }) => (
+                <NavButton
+                  key={id}
+                  label={label}
+                  icon={Icon}
+                  active={section === id}
+                  onClick={() => navigate(id)}
+                />
+              ))}
             </ul>
           </nav>
           <div className="mt-10 border-t border-[var(--border)] pt-4 text-xs leading-5 text-[var(--muted)]">
@@ -191,7 +221,7 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
             {unauthorizedPath ? (
               <section
                 role="alert"
-                className="mx-auto max-w-xl rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 text-center shadow-[var(--shadow)]"
+                className="mx-auto max-w-xl rounded-xl border border-[var(--border)] bg-[var(--panel)] p-6 text-center shadow-[var(--shadow)]"
               >
                 <h1 className="text-lg font-semibold text-[var(--civic-navy)]">
                   Organization not found
@@ -330,7 +360,7 @@ function CreateOrganizationPanel({ onCreated }: { onCreated: () => Promise<void>
     }
   }
   return (
-    <section className="mx-auto max-w-xl rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-[var(--shadow)] sm:p-8">
+    <section className="mx-auto max-w-xl rounded-xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-[var(--shadow)] sm:p-8">
       <p className="text-xs font-semibold tracking-[0.1em] text-[var(--lumi-blue)]">GET STARTED</p>
       <h1 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[var(--civic-navy)]">
         Create an organization
@@ -392,7 +422,7 @@ function OverviewPanel({
           detail={`Version ${organization.version}`}
         />
       </div>
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
         <div className="border-b border-[var(--border)] px-5 py-4">
           <h2 className="text-base font-semibold text-[var(--civic-navy)]">Tenant controls</h2>
           <p className="mt-1 text-sm text-[var(--muted-strong)]">
@@ -422,7 +452,7 @@ function MembersPanel({
   const [error, setError] = useState<unknown>(null);
   const canManage = currentMembership?.role === "owner" || currentMembership?.role === "admin";
   return (
-    <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
+    <section className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
       <div className="border-b border-[var(--border)] px-5 py-4">
         <h2 className="text-base font-semibold text-[var(--civic-navy)]">Members</h2>
         <p className="mt-1 text-sm text-[var(--muted-strong)]">
@@ -456,7 +486,7 @@ function MembersPanel({
                 <td className="px-5 py-4">
                   <StatusPill status={member.status} />
                 </td>
-                <td className="px-5 py-4 text-[var(--muted-strong)]">
+                <td className="px-5 py-4 tabular-nums text-[var(--muted-strong)]">
                   {member.joined_at ? formatDate(member.joined_at) : "—"}
                 </td>
                 {canManage ? (
@@ -504,7 +534,7 @@ function TeamsPanel({
 }) {
   return (
     <div className="space-y-4">
-      <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
+      <section className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
         <div className="border-b border-[var(--border)] px-5 py-4">
           <h2 className="text-base font-semibold text-[var(--civic-navy)]">Teams</h2>
           <p className="mt-1 text-sm text-[var(--muted-strong)]">
@@ -570,14 +600,14 @@ function InviteDialog({
   }
   return (
     <div
-      className="fixed inset-0 z-20 grid place-items-center bg-[var(--civic-navy)]/30 p-4"
+      className="fixed inset-0 z-30 grid place-items-center bg-[var(--civic-navy)]/30 p-4"
       role="presentation"
     >
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="invite-title"
-        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-[var(--shadow)]"
+        className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-[var(--shadow)]"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -594,7 +624,7 @@ function InviteDialog({
             className={iconButton}
             aria-label="Close invitation dialog"
           >
-            ×
+            <IconX className="size-5" />
           </button>
         </div>
         <form onSubmit={(event) => void submit(event)} className="mt-6 space-y-4">
@@ -666,12 +696,12 @@ function CreateTeamDialog({
     }
   }
   return (
-    <div className="fixed inset-0 z-20 grid place-items-center bg-[var(--civic-navy)]/30 p-4">
+    <div className="fixed inset-0 z-30 grid place-items-center bg-[var(--civic-navy)]/30 p-4">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="team-title"
-        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-[var(--shadow)]"
+        className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-[var(--shadow)]"
       >
         <h2 id="team-title" className="text-lg font-semibold text-[var(--civic-navy)]">
           Create a team
@@ -712,10 +742,12 @@ function CreateTeamDialog({
 
 function NavButton({
   label,
+  icon: Icon,
   active,
   onClick,
 }: {
   label: string;
+  icon: ComponentType<{ className?: string }>;
   active: boolean;
   onClick: () => void;
 }) {
@@ -726,12 +758,13 @@ function NavButton({
         onClick={onClick}
         aria-current={active ? "page" : undefined}
         className={[
-          "flex min-h-11 w-full items-center rounded-lg border-l-2 px-3 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
+          "flex min-h-11 w-full items-center gap-2.5 rounded-lg border-l-2 px-3 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
           active
             ? "border-l-[var(--lumi-blue)] bg-[var(--lumi-blue-soft)] font-semibold text-[var(--lumi-blue)]"
             : "border-l-transparent text-[var(--muted-strong)] hover:bg-[var(--panel-hover)] hover:text-[var(--foreground)]",
         ].join(" ")}
       >
+        <Icon className="size-[18px] shrink-0" />
         {label}
       </button>
     </li>
@@ -741,7 +774,7 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-[var(--shadow)]">
       <p className="text-xs font-medium text-[var(--muted)]">{label}</p>
-      <p className="mt-2 text-xl font-semibold tracking-[-0.02em] text-[var(--civic-navy)]">
+      <p className="mt-2 text-xl font-semibold tabular-nums tracking-[-0.02em] text-[var(--civic-navy)]">
         {value}
       </p>
       <p className="mt-1 text-xs text-[var(--muted)]">{detail}</p>
@@ -781,7 +814,7 @@ function StatusPill({ status }: { status: string }) {
 function LoadingPanel({ label }: { label: string }) {
   return (
     <div
-      className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-8 text-sm text-[var(--muted)]"
+      className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-8 text-sm text-[var(--muted)]"
       aria-live="polite"
     >
       {label}
@@ -830,10 +863,10 @@ function formatDate(value: string): string {
     : date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 const inputClass =
-  "mt-1.5 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm font-normal text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus-visible:border-[var(--lumi-blue)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)]";
+  "mt-1.5 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-sm font-normal text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus-visible:border-[var(--lumi-blue)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)]";
 const primaryButton =
-  "min-h-11 rounded-lg bg-[var(--lumi-blue)] px-4 py-2 text-sm font-semibold text-white outline-none transition hover:bg-[var(--lumi-blue-hover)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50";
+  "min-h-11 rounded-lg bg-[var(--lumi-blue)] px-4 py-2 text-sm font-semibold text-white shadow-[var(--shadow-button)] outline-none transition hover:bg-[var(--lumi-blue-hover)] active:translate-y-px focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50";
 const secondaryButton =
-  "min-h-11 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-medium outline-none transition hover:bg-[var(--panel-hover)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]";
+  "inline-flex min-h-11 items-center gap-2 whitespace-nowrap rounded-lg border border-[var(--lumi-blue)]/40 bg-[var(--panel)] px-4 py-2 text-sm font-medium text-[var(--lumi-blue)] outline-none transition hover:border-[var(--lumi-blue)]/60 hover:bg-[var(--lumi-blue-soft)] active:translate-y-px focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]";
 const iconButton =
   "grid size-10 place-items-center rounded-lg text-xl text-[var(--muted)] outline-none hover:bg-[var(--panel-hover)] focus-visible:ring-2 focus-visible:ring-[var(--ring)]";
