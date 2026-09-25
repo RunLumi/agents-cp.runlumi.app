@@ -17,7 +17,9 @@ use crate::{
 
 pub struct DeviceAccess {
     pub device: crate::repositories::DeviceRecord,
+    #[allow(dead_code)]
     pub organization: OrganizationRecord,
+    #[allow(dead_code)]
     pub membership: MembershipRecord,
 }
 

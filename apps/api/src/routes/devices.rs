@@ -33,7 +33,10 @@ use crate::{
         },
         policy::{self, PolicyInputs},
     },
-    repositories::{DeviceRepository, OrganizationRepository, PolicyRepository, ProjectRepository},
+    repositories::{
+        BudgetRepository, DeviceRepository, OrganizationRepository, PolicyRepository,
+        ProjectRepository, ToolRepository,
+    },
     routes::{
         authorization::authorize_org,
         errors,
@@ -185,7 +188,7 @@ LIMIT 1
 /// Compile and persist a new org policy snapshot when the compiled payload
 /// differs from the latest one (deterministic compilation makes payload
 /// equality a safe version gate). Returns the current version.
-async fn refresh_policy_snapshot(
+pub(crate) async fn refresh_policy_snapshot(
     database: &crate::adapters::d1::D1Adapter,
     context: &RequestContext,
     org_id: &str,
@@ -220,13 +223,59 @@ async fn refresh_policy_snapshot(
     let member_active = devices
         .iter()
         .any(|device| DeviceStatus::parse(&device.status) == Some(DeviceStatus::Active));
+    let budget_rows = BudgetRepository::new(database)
+        .list_budgets(org_id, None, None, None, PAGE_LIMIT_MAX)
+        .await
+        .map_err(|_| service_unavailable(context))?;
+    let rate_rows = BudgetRepository::new(database)
+        .list_rate_limit_policies(org_id, None, None, None, PAGE_LIMIT_MAX)
+        .await
+        .map_err(|_| service_unavailable(context))?;
+    let tool_policy = ToolRepository::new(database)
+        .find_tool_policy(org_id, None)
+        .await
+        .map_err(|_| service_unavailable(context))?;
+    let tools_section = tool_policy
+        .as_ref()
+        .and_then(|record| serde_json::from_str::<Value>(&record.document_json).ok())
+        .filter(|value| value.get("schema_version").and_then(Value::as_u64) == Some(1))
+        .unwrap_or_else(|| json!({"schema_version": 1, "default_posture": "deny"}));
+    let budget_scope_ids = budget_rows
+        .iter()
+        .map(|record| record.budget_id.clone())
+        .collect::<Vec<_>>();
+    let rate_policies = rate_rows
+        .iter()
+        .map(|record| {
+            json!({
+                "rate_limit_policy_id": record.rate_limit_policy_id,
+                "scope_type": record.scope_type,
+                "scope_id": record.scope_id,
+                "requests_per_minute": record.requests_per_minute,
+                "tokens_per_minute": record.tokens_per_minute,
+                "max_concurrent_requests": record.max_concurrent_requests,
+            })
+        })
+        .collect::<Vec<_>>();
+    let extensions = json!({
+        "tools": tools_section,
+        "budgets": {
+            "schema_version": 1,
+            "hard_fail_closed": true,
+            "scope_ids": budget_scope_ids,
+        },
+        "rate_limits": {
+            "schema_version": 1,
+            "policies": rate_policies,
+        },
+    });
     let inputs = PolicyInputs {
         org_active: true,
         member_active,
         project_bindings: &bindings,
         min_client_version,
     };
-    let payload = policy::compile_policy_payload(&inputs, None).map_err(|_| {
+    let payload = policy::compile_policy_payload(&inputs, Some(&extensions)).map_err(|_| {
         errors::api_error(
             context,
             ApiErrorCode::InternalError,

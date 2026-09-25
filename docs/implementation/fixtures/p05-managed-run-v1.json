@@ -1,0 +1,54 @@
+{
+  "contract": "p05-cg-v1",
+  "change_request": "P05-CR-002",
+  "organizations": {
+    "a": "org_0123456789abcdef0123456789abcdef",
+    "b": "org_1123456789abcdef0123456789abcdef"
+  },
+  "users": {
+    "a": "usr_0123456789abcdef0123456789abcdef",
+    "b": "usr_1123456789abcdef0123456789abcdef"
+  },
+  "projects": {
+    "a": "prj_0123456789abcdef0123456789abcdef",
+    "b": "prj_1123456789abcdef0123456789abcdef"
+  },
+  "devices": {
+    "a": "dvc_0123456789abcdef0123456789abcdef",
+    "b_revoked": "dvc_1123456789abcdef0123456789abcdef"
+  },
+  "agents": {
+    "a": "agd_0123456789abcdef0123456789abcdef"
+  },
+  "sessions": {
+    "a": "rse_0123456789abcdef0123456789abcdef"
+  },
+  "runs": {
+    "a": "run_0123456789abcdef0123456789abcdef",
+    "retry": "run_1123456789abcdef0123456789abcdef",
+    "b": "run_2123456789abcdef0123456789abcdef"
+  },
+  "tools": {
+    "readonly": "tool_0123456789abcdef0123456789abcdef",
+    "browser_submit": "tool_1123456789abcdef0123456789abcdef",
+    "unknown_privileged": "tool_2123456789abcdef0123456789abcdef"
+  },
+  "mcp": {
+    "fixture": "mcp_0123456789abcdef0123456789abcdef"
+  },
+  "approvals": {
+    "pending": "apr_0123456789abcdef0123456789abcdef",
+    "approved": "apr_1123456789abcdef0123456789abcdef"
+  },
+  "budget": {
+    "id": "bud_0123456789abcdef0123456789abcdef",
+    "currency": "USD",
+    "limit_minor": 1000,
+    "hard": true
+  },
+  "notes": [
+    "All identifiers are synthetic and contain no credential or raw prompt material.",
+    "The revoked device and organization B rows exist only for hostile tenant/device checks.",
+    "The integration smoke may provision fresh IDs rather than inserting these fixture rows directly."
+  ]
+}

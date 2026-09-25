@@ -150,7 +150,7 @@ CREATE INDEX idx_artifact_refs_run ON artifact_refs(run_id, created_at);
 
 CREATE TABLE tool_call_refs (
     tool_call_id TEXT PRIMARY KEY CHECK (
-        length(tool_call_id) = 37 AND substr(tool_call_id, 1, 5) = 'tcl_'
+        length(tool_call_id) = 36 AND substr(tool_call_id, 1, 4) = 'tcl_'
     ),
     org_id TEXT NOT NULL REFERENCES organizations(org_id) ON DELETE RESTRICT,
     project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,

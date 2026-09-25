@@ -452,12 +452,16 @@ P05 event names are stable and versioned:
 - `session.closed.v1`
 - `run.created.v1`
 - `run.state_changed.v1`
+- `run.started.v1`
+- `run.completed.v1`
+- `run.failed.v1`
 - `run.cancelled.v1`
 - `run.retried.v1`
 - `run.event_appended.v1`
 - `tool.catalog_updated.v1`
 - `tool.mcp_registration_changed.v1`
 - `tool.decision_recorded.v1`
+- `tool.result.v1`
 - `tool.denied.v1`
 - `approval.requested.v1`
 - `approval.resolved.v1`
@@ -477,7 +481,7 @@ Migration `0010_p05_runs_tools_usage_control.sql` creates or extends:
 - `agent_definitions`, `agent_sessions`, `runs`, `run_events`, `artifact_refs`, `tool_call_refs`;
 - `tool_definitions`, `capability_definitions`, `mcp_registrations`, `tool_policies`;
 - `approval_requests`;
-- `cost_records`, `usage_rollups` (derived/rebuildable), `rate_limit_policies`;
+- `cost_records`, `run_usage_events`, `run_cost_records`, `usage_rollups` (derived/rebuildable), `rate_limit_policies`;
 - P05 additions to P04 `usage_events` and reservation reconciliation columns where additive.
 
 Invariant-bearing constraints include:
@@ -530,7 +534,7 @@ Handlers return the P01 envelope and `X-Request-ID`; clients branch on codes/rea
 
 ## Fixtures
 
-The frozen P05 fixture uses opaque, obviously synthetic values and a development-only mock execution host:
+The frozen machine-readable fixture is `docs/implementation/fixtures/p05-managed-run-v1.json`. The frozen P05 fixture uses opaque, obviously synthetic values and a development-only mock execution host:
 
 - Org A, Project A, enrolled active Device A, AgentDefinition A, Session A.
 - Org B and a revoked Device B for tenant/revocation negatives.

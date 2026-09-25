@@ -17,7 +17,6 @@ pub const RATE_LIMIT_POLICY_SCHEMA_VERSION: u32 = 1;
 pub enum DefaultPosture {
     #[default]
     Deny,
-    Deny,
     Allow,
 }
 
@@ -158,7 +157,10 @@ mod tests {
         });
         let policy = tool_policy(&payload).expect("typed policy");
         assert_eq!(policy.default_posture, DefaultPosture::Deny);
-        assert_eq!(policy.rules[0].decision, PolicyDecision::RequirePerUseApproval);
+        assert_eq!(
+            policy.rules[0].decision,
+            PolicyDecision::RequirePerUseApproval
+        );
         assert!(tool_policy(&json!({"tools": {"schema_version": 0}})).is_none());
     }
 

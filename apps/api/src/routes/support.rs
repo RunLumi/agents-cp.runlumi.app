@@ -3,7 +3,10 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::{
-    adapters::{d1::{BindValue, D1Adapter}, new_event_id},
+    adapters::{
+        d1::{BindValue, D1Adapter},
+        new_event_id,
+    },
     app::AppState,
     core::{
         ActorContext, ActorId, ApiError, ApiErrorCode, EventEnvelope, EventType, OrganizationId,

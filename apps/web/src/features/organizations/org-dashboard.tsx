@@ -1,4 +1,13 @@
-import { useEffect, useId, useMemo, useRef, useState, type ComponentType } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
 
 import { LumiWordmark } from "@/components/brand";
 import {
@@ -6,7 +15,9 @@ import {
   IconLogout,
   IconMenu,
   IconRoute,
+  IconRun,
   IconShieldLock,
+  IconToolShield,
   IconUsers,
   IconUsersGroup,
   IconX,
@@ -32,6 +43,18 @@ import {
 } from "@/lib/api";
 import { presentApiError } from "@/lib/errors";
 
+const RunsPanel = lazy(() =>
+  import("@/features/runs/runs-panel").then((module) => ({ default: module.RunsPanel })),
+);
+const ToolsPanel = lazy(() =>
+  import("@/features/tools/tools-panel").then((module) => ({ default: module.ToolsPanel })),
+);
+const UsageBudgetsPanel = lazy(() =>
+  import("@/features/usage/usage-budgets-panel").then((module) => ({
+    default: module.UsageBudgetsPanel,
+  })),
+);
+
 interface OrgDashboardProps {
   me: MeResponse;
   onSignOut: () => void;
@@ -43,6 +66,9 @@ type Section =
   | "members"
   | "teams"
   | "projects"
+  | "runs"
+  | "tools"
+  | "usage"
   | "devices"
   | "policy"
   | "models"
@@ -50,12 +76,15 @@ type Section =
 
 const sections: { id: Section; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: "overview", label: "Overview", icon: IconHome },
+  { id: "projects", label: "Projects", icon: IconHome },
+  { id: "runs", label: "Agents & runs", icon: IconRun },
   { id: "members", label: "Members", icon: IconUsers },
   { id: "teams", label: "Teams", icon: IconUsersGroup },
-  { id: "projects", label: "Projects", icon: IconHome },
+  { id: "tools", label: "Tools & approvals", icon: IconToolShield },
+  { id: "models", label: "Models & routing", icon: IconRoute },
+  { id: "usage", label: "Usage & budgets", icon: IconRoute },
   { id: "devices", label: "Devices", icon: IconUsers },
   { id: "policy", label: "Policy", icon: IconShieldLock },
-  { id: "models", label: "Models & routing", icon: IconRoute },
   { id: "account", label: "Account security", icon: IconShieldLock },
 ];
 
@@ -71,6 +100,9 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
     return path === "members" ||
       path === "teams" ||
       path === "projects" ||
+      path === "runs" ||
+      path === "tools" ||
+      path === "usage" ||
       path === "devices" ||
       path === "policy" ||
       path === "models" ||
@@ -372,6 +404,20 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                 ) : null}
                 {section === "projects" ? (
                   <ProjectsPanel orgId={load.organization.org_id} canManage={canManage} />
+                ) : null}
+                {section === "runs" || section === "tools" || section === "usage" ? (
+                  <Suspense fallback={<LoadingPanel label="Loading control surface…" />}>
+                    {section === "runs" ? <RunsPanel orgId={load.organization.org_id} /> : null}
+                    {section === "tools" ? (
+                      <ToolsPanel
+                        orgId={load.organization.org_id}
+                        {...(selected ? { membership: { role: selected.role } } : {})}
+                      />
+                    ) : null}
+                    {section === "usage" ? (
+                      <UsageBudgetsPanel orgId={load.organization.org_id} />
+                    ) : null}
+                  </Suspense>
                 ) : null}
                 {section === "devices" ? (
                   <DevicesPanel orgId={load.organization.org_id} currentUserId={me.user.id} />

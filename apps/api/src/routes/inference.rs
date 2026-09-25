@@ -18,15 +18,19 @@ use crate::{
     adapters::{
         add_seconds,
         crypto::decrypt_secret,
+        d1::BindValue,
         new_resource_id,
         providers::{AdapterKind, dispatch},
     },
     app::AppState,
-    core::{ApiError, ApiErrorCode, RequestContext},
+    core::{ApiError, ApiErrorCode, Principal, RequestContext, Timestamp},
     http::auth::require_csrf,
     modules::{
         authorization::Permission,
-        budget::{AllowAllBudgetHook, BudgetDecision, BudgetHook, BudgetRequest},
+        budget_p05::{
+            BudgetDecision as P05BudgetDecision, BudgetEvaluationRequest, BudgetKind, BudgetPolicy,
+            BudgetScope, MAX_RESERVATION_MINOR, ScopeContext, evaluate_budget_request,
+        },
         catalog::{CatalogLifecycle, CatalogPolicy, ModelCapabilities, ModelCapability},
         credentials::{
             CredentialMetadata, CredentialMode, CredentialOwnerType, CredentialStatus,
@@ -38,19 +42,58 @@ use crate::{
             SseDecoder,
         },
         policy_p04::PolicySnapshotEnvelope,
+        policy_p05 as p05_policy,
+        rate_limits::{
+            RateLimitDecision, RateLimitDimension, RateLimitPolicy, RateLimitPolicyState,
+            RateLimitRequest, RateLimitUsage, evaluate_rate_limit_states,
+        },
         routing::{RouteConfig, SelectedCandidate, select_candidates, validate_route_config},
+        runs::RunState,
     },
     repositories::{
-        AiRepository, CredentialRecord, ModelRecord, PolicyRecord, PolicyRepository, ProviderRecord,
+        AgentSessionRecord, AiRepository, BudgetRepository, BudgetScopeSnapshot, CredentialRecord,
+        DeviceRecord, DeviceRepository, ModelRecord, NewReservationInput, PolicyRecord,
+        PolicyRepository, ProjectRepository, ProviderRecord, ReservationReconcileInput, RunRecord,
+        RunRepository,
     },
     routes::{
+        agents::{can_manage_projects, ensure_project_access},
         authorization::authorize_org,
         errors,
         support::{
-            database, database_error, domain_error, outbox_statement, security_event_statement,
+            database, database_error, domain_error, outbox_statement,
+            security_event_statement_with_context,
         },
     },
 };
+
+const P05_BUDGET_SNAPSHOT_LIMIT: i32 = 128;
+const P05_RATE_POLICY_LIMIT: i32 = 100;
+const P05_RESERVATION_TTL_SECONDS: u32 = 3_600;
+const P05_MAX_RESERVATION_TOKENS: u64 = 1_000_000;
+
+/// P05 adds server-owned correlation columns to the P04 request projection. The
+/// P04 repository still owns the base insert; this additive statement binds the
+/// run-derived identity immediately afterwards in the same D1 batch. Keeping
+/// this here avoids making a client-supplied project/device/session authoritative.
+const ATTACH_MANAGED_INFERENCE_IDENTITY_SQL: &str = r#"
+UPDATE inference_requests
+SET agent_session_id = ?1,
+    agent_definition_id = ?2,
+    agent_definition_version = ?3
+WHERE request_id = ?4 AND org_id = ?5 AND run_id = ?6
+"#;
+
+const ATTACH_MANAGED_RUN_POLICY_SQL: &str = r#"
+UPDATE runs
+SET policy_snapshot_id = ?1,
+    policy_version = ?2
+WHERE run_id = ?3 AND org_id = ?4
+  AND (
+    policy_snapshot_id IS NULL
+    OR (policy_snapshot_id = ?1 AND policy_version = ?2)
+  )
+"#;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,6 +114,7 @@ pub struct NativeRequest {
     pub tools: Option<Vec<Value>>,
     pub project_id: Option<String>,
     pub session_id: Option<String>,
+    pub agent_session_id: Option<String>,
     pub run_id: Option<String>,
 }
 
@@ -115,17 +159,36 @@ enum ResponseFormat {
 }
 
 #[derive(Clone)]
+struct ManagedRunScope {
+    run: RunRecord,
+    session: AgentSessionRecord,
+    device: DeviceRecord,
+    policy_snapshot: PolicySnapshotEnvelope,
+}
+
+#[derive(Clone)]
 struct RequestScope {
+    request_id: String,
     org_id: String,
     project_id: Option<String>,
     session_id: String,
     device_id: Option<String>,
     run_id: Option<String>,
+    agent_session_id: Option<String>,
+    agent_definition_id: Option<String>,
+    agent_definition_version: Option<i64>,
+    workspace_binding_id: Option<String>,
+    policy_snapshot_id: Option<String>,
+    policy_version: Option<i64>,
+    managed_run: bool,
     model_alias: String,
     route_id: String,
     route_version_id: String,
     route_version_number: i64,
     reservation_id: String,
+    reserved_minor: i64,
+    budget_id: Option<String>,
+    currency: String,
     principal_user_id: String,
     credential_mode: CredentialMode,
 }
@@ -138,6 +201,9 @@ struct StreamMetadata {
     route_version_id: String,
     route_version_number: i64,
     reservation_id: String,
+    reserved_minor: i64,
+    budget_id: Option<String>,
+    currency: String,
     provider_id: String,
     model_id: String,
     provider_request_id: Option<String>,
@@ -146,6 +212,13 @@ struct StreamMetadata {
     run_id: Option<String>,
     session_id: String,
     device_id: Option<String>,
+    agent_session_id: Option<String>,
+    agent_definition_id: Option<String>,
+    agent_definition_version: Option<i64>,
+    workspace_binding_id: Option<String>,
+    policy_snapshot_id: Option<String>,
+    policy_version: Option<i64>,
+    managed_run: bool,
     principal_user_id: String,
     org_id: String,
     credential_id: Option<String>,
@@ -332,6 +405,7 @@ pub async fn responses(
     headers: HeaderMap,
     Json(body): Json<NativeRequest>,
 ) -> Result<Response<Body>, ApiError> {
+    let requested_agent_session_id = body.agent_session_id.clone();
     let request = native_request(body, &context)?;
     run_inference(
         state,
@@ -340,6 +414,7 @@ pub async fn responses(
         request,
         ResponseFormat::Native,
         Some(&caller_signal),
+        requested_agent_session_id.as_deref(),
         policy_snapshot.as_ref().map(|extension| &extension.0),
     )
     .await
@@ -362,6 +437,7 @@ pub async fn chat_completions(
         request,
         ResponseFormat::Chat,
         Some(&caller_signal),
+        None,
         policy_snapshot.as_ref().map(|extension| &extension.0),
     )
     .await
@@ -395,13 +471,847 @@ async fn load_trusted_policy_snapshot(
     }))
 }
 
+#[derive(Clone)]
+struct P05BudgetAdmission {
+    decision: P05BudgetDecision,
+    budget_id: Option<String>,
+    currency: String,
+}
+
+#[derive(Clone)]
+struct P05RateAdmission {
+    decision: RateLimitDecision,
+}
+
+fn p05_error(
+    context: &RequestContext,
+    code: ApiErrorCode,
+    reason: &'static str,
+    message: &'static str,
+) -> ApiError {
+    domain_error(context, code, reason, message)
+}
+
+fn p05_not_found(context: &RequestContext, reason: &'static str) -> ApiError {
+    p05_error(
+        context,
+        ApiErrorCode::NotFound,
+        reason,
+        "The requested run context was not found.",
+    )
+}
+
+fn p05_scope_error(context: &RequestContext) -> ApiError {
+    p05_error(
+        context,
+        ApiErrorCode::PermissionDenied,
+        "resource_scope_mismatch",
+        "The run is outside the current execution scope.",
+    )
+}
+
+fn p05_policy_unavailable(context: &RequestContext) -> ApiError {
+    p05_error(
+        context,
+        ApiErrorCode::ServiceUnavailable,
+        "policy_state_unavailable",
+        "The current execution policy is unavailable.",
+    )
+}
+
+fn p05_budget_unavailable(context: &RequestContext) -> ApiError {
+    p05_error(
+        context,
+        ApiErrorCode::ServiceUnavailable,
+        "budget_state_unavailable",
+        "The authoritative budget state is unavailable.",
+    )
+}
+
+fn p05_rate_unavailable(context: &RequestContext) -> ApiError {
+    p05_error(
+        context,
+        ApiErrorCode::ServiceUnavailable,
+        "rate_limit_state_unavailable",
+        "The authoritative rate-limit state is unavailable.",
+    )
+}
+
+/// Normalize the timestamp forms accepted by the P04/P05 schema before using
+/// them in Rust-side period arithmetic or fixed-width D1 comparisons.
+fn canonical_instant_text(value: &str) -> Option<String> {
+    let normalized = if value.len() == 24 && value.ends_with('Z') {
+        value.to_owned()
+    } else {
+        let head = value.get(..19)?;
+        let suffix = value.get(19..)?;
+        if suffix == "Z" {
+            format!("{head}.000Z")
+        } else {
+            let fraction = suffix.strip_prefix('.')?.strip_suffix('Z')?;
+            if fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            let mut milliseconds = fraction.chars().take(3).collect::<String>();
+            while milliseconds.len() < 3 {
+                milliseconds.push('0');
+            }
+            format!("{head}.{milliseconds}Z")
+        }
+    };
+    Timestamp::new(normalized.clone()).ok()?;
+    Some(normalized)
+}
+
+/// Convert a validated UTC instant to Unix seconds without relying on a local
+/// timezone or a JavaScript clock. P05 budget/rate evaluators only need a
+/// monotonic numeric projection of the server timestamp.
+fn epoch_seconds(value: &str) -> Option<u64> {
+    Timestamp::new(value).ok()?;
+    let bytes = value.as_bytes();
+    if bytes.len() < 20 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' {
+        return None;
+    }
+    let number =
+        |start: usize, end: usize| -> Option<i64> { value.get(start..end)?.parse::<i64>().ok() };
+    let year = number(0, 4)?;
+    let month = number(5, 7)?;
+    let day = number(8, 10)?;
+    let hour = number(11, 13)?;
+    let minute = number(14, 16)?;
+    let second = number(17, 19)?;
+    if !(1..=12).contains(&month)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=60).contains(&second)
+        || !(1..=31).contains(&day)
+    {
+        return None;
+    }
+    let days = days_from_civil(year, month, day);
+    let seconds = days
+        .checked_mul(86_400)?
+        .checked_add(hour * 3_600)?
+        .checked_add(minute * 60)?
+        .checked_add(second)?;
+    u64::try_from(seconds).ok()
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let adjusted_year = if month <= 2 { year - 1 } else { year };
+    let era = if adjusted_year >= 0 {
+        adjusted_year
+    } else {
+        adjusted_year - 399
+    } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let adjusted_month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * adjusted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn p05_policy_scope_matches(payload: &Value, project_id: &str, device_id: &str) -> bool {
+    let member_active = payload
+        .get("org_access")
+        .and_then(|value| value.get("member"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    if !member_active {
+        return false;
+    }
+    let project_matches = if let Some(value) = payload.get("project_id") {
+        value.as_str() == Some(project_id)
+    } else {
+        payload
+            .get("projects")
+            .and_then(|value| value.get("bindings"))
+            .and_then(Value::as_array)
+            .is_some_and(|bindings| {
+                !bindings.is_empty()
+                    && bindings.iter().all(Value::is_string)
+                    && bindings
+                        .iter()
+                        .any(|value| value.as_str() == Some(project_id))
+            })
+    };
+    let device_matches = match payload.get("device_id") {
+        Some(value) => value.as_str() == Some(device_id),
+        None => match payload.get("device") {
+            Some(device) => device.get("id").and_then(Value::as_str) == Some(device_id),
+            None => true,
+        },
+    };
+    project_matches && device_matches
+}
+
+fn validate_p05_policy_sections(payload: &Value, context: &RequestContext) -> Result<(), ApiError> {
+    let budgets = payload
+        .get("budgets")
+        .ok_or_else(|| p05_budget_unavailable(context))?;
+    if p05_policy::is_opaque_placeholder(Some(budgets))
+        || p05_policy::budget_policy(payload).is_none()
+    {
+        return Err(p05_budget_unavailable(context));
+    }
+    let rate_limits = payload
+        .get("rate_limits")
+        .ok_or_else(|| p05_rate_unavailable(context))?;
+    if p05_policy::is_opaque_placeholder(Some(rate_limits))
+        || p05_policy::rate_limit_policy(payload).is_none()
+    {
+        return Err(p05_rate_unavailable(context));
+    }
+    Ok(())
+}
+
+async fn load_managed_policy_snapshot(
+    database: &crate::adapters::d1::D1Adapter,
+    org_id: &str,
+    project_id: &str,
+    device_id: &str,
+    context: &RequestContext,
+) -> Result<PolicySnapshotEnvelope, ApiError> {
+    let snapshot = PolicyRepository::new(database)
+        .latest_snapshot(org_id)
+        .await
+        .map_err(|_| p05_policy_unavailable(context))?
+        .ok_or_else(|| p05_policy_unavailable(context))?;
+    let now = canonical_instant_text(context.received_at.as_str())
+        .ok_or_else(|| p05_policy_unavailable(context))?;
+    let expires_at = canonical_instant_text(snapshot.expires_at.as_str())
+        .ok_or_else(|| p05_policy_unavailable(context))?;
+    if snapshot.org_id != org_id || snapshot.policy_version <= 0 || expires_at <= now {
+        return Err(p05_policy_unavailable(context));
+    }
+    let payload = serde_json::from_str::<Value>(&snapshot.payload)
+        .map_err(|_| p05_policy_unavailable(context))?;
+    if !p05_policy_scope_matches(&payload, project_id, device_id) {
+        return Err(p05_scope_error(context));
+    }
+    validate_p05_policy_sections(&payload, context)?;
+    Ok(PolicySnapshotEnvelope {
+        policy_id: snapshot.policy_id,
+        org_id: snapshot.org_id,
+        policy_version: snapshot.policy_version,
+        payload,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn resolve_managed_run_scope(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    context: &RequestContext,
+    principal: &Principal,
+    org_id: &str,
+    run_id: &str,
+    model_alias: &str,
+    requested_agent_session_id: Option<&str>,
+) -> Result<ManagedRunScope, ApiError> {
+    let database = database(state, context)?;
+    let runs = RunRepository::new(database);
+    let run = runs
+        .find_run(org_id, run_id)
+        .await
+        .map_err(|_| {
+            p05_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "run_state_unavailable",
+                "The run state is unavailable.",
+            )
+        })?
+        .ok_or_else(|| p05_not_found(context, "run_not_found"))?;
+    if run.org_id != org_id
+        || run.principal_user_id != principal.user_id.as_str()
+        || run.model_alias.as_deref() != Some(model_alias)
+        || requested_agent_session_id.is_some_and(|session_id| session_id != run.agent_session_id)
+    {
+        return Err(p05_scope_error(context));
+    }
+    let run_state = RunState::parse(&run.state).ok_or_else(|| {
+        p05_error(
+            context,
+            ApiErrorCode::ServiceUnavailable,
+            "run_state_unavailable",
+            "The run state is unavailable.",
+        )
+    })?;
+    if run_state.is_terminal() {
+        return Err(p05_error(
+            context,
+            ApiErrorCode::Conflict,
+            "run_terminal",
+            "The run is already terminal.",
+        ));
+    }
+
+    let session = runs
+        .find_session(org_id, &run.agent_session_id)
+        .await
+        .map_err(|_| {
+            p05_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "session_state_unavailable",
+                "The agent session state is unavailable.",
+            )
+        })?
+        .ok_or_else(|| p05_not_found(context, "session_not_found"))?;
+    if session.project_id != run.project_id
+        || session.device_id != run.device_id
+        || session.agent_definition_id != run.agent_definition_id
+        || session.agent_definition_version != run.agent_definition_version
+        || session.workspace_binding_id != run.workspace_binding_id
+        || session.lifecycle != "active"
+    {
+        return Err(if session.lifecycle != "active" {
+            p05_error(
+                context,
+                ApiErrorCode::Conflict,
+                "session_closed",
+                "The agent session is closed.",
+            )
+        } else {
+            p05_scope_error(context)
+        });
+    }
+
+    let project = ProjectRepository::new(database)
+        .find_project(&run.project_id)
+        .await
+        .map_err(|_| {
+            p05_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "project_state_unavailable",
+                "The project state is unavailable.",
+            )
+        })?
+        .filter(|project| project.org_id == org_id)
+        .ok_or_else(|| p05_not_found(context, "project_not_found"))?;
+    if project.archived_at.is_some() {
+        return Err(p05_error(
+            context,
+            ApiErrorCode::Conflict,
+            "project_archived",
+            "The project is archived.",
+        ));
+    }
+    let manager = can_manage_projects(state, headers, context, org_id).await;
+    ensure_project_access(
+        database,
+        context,
+        org_id,
+        &run.project_id,
+        principal.user_id.as_str(),
+        manager,
+    )
+    .await?;
+
+    let device = DeviceRepository::new(database)
+        .find_device(&run.device_id)
+        .await
+        .map_err(|_| {
+            p05_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "device_state_unavailable",
+                "The execution device state is unavailable.",
+            )
+        })?
+        .filter(|device| device.org_id == org_id)
+        .ok_or_else(|| p05_not_found(context, "device_not_found"))?;
+    if device.status != "active" {
+        return Err(p05_error(
+            context,
+            ApiErrorCode::PermissionDenied,
+            "device_revoked",
+            "The execution device is not active.",
+        ));
+    }
+
+    if let Some(binding_id) = session.workspace_binding_id.as_deref() {
+        let binding = ProjectRepository::new(database)
+            .find_binding(binding_id)
+            .await
+            .map_err(|_| {
+                p05_error(
+                    context,
+                    ApiErrorCode::ServiceUnavailable,
+                    "workspace_binding_unavailable",
+                    "The workspace binding state is unavailable.",
+                )
+            })?
+            .ok_or_else(|| {
+                p05_error(
+                    context,
+                    ApiErrorCode::NotFound,
+                    "workspace_binding_mismatch",
+                    "The workspace binding is not available.",
+                )
+            })?;
+        if binding.org_id != org_id
+            || binding.project_id != run.project_id
+            || binding.device_id != run.device_id
+        {
+            return Err(p05_error(
+                context,
+                ApiErrorCode::PermissionDenied,
+                "workspace_binding_mismatch",
+                "The workspace binding is outside the run scope.",
+            ));
+        }
+    }
+
+    let agent = runs
+        .find_agent(org_id, &run.agent_definition_id)
+        .await
+        .map_err(|_| {
+            p05_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "agent_state_unavailable",
+                "The agent state is unavailable.",
+            )
+        })?
+        .ok_or_else(|| p05_not_found(context, "agent_not_found"))?;
+    if agent.lifecycle != "active"
+        || agent
+            .project_id
+            .as_deref()
+            .is_some_and(|project_id| project_id != run.project_id)
+    {
+        return Err(p05_not_found(context, "agent_not_found"));
+    }
+
+    let policy_snapshot =
+        load_managed_policy_snapshot(database, org_id, &run.project_id, &run.device_id, context)
+            .await?;
+    if run
+        .policy_snapshot_id
+        .as_deref()
+        .is_some_and(|policy_id| policy_id != policy_snapshot.policy_id)
+        || run
+            .policy_version
+            .is_some_and(|version| version <= 0 || version != policy_snapshot.policy_version)
+    {
+        return Err(p05_policy_unavailable(context));
+    }
+
+    Ok(ManagedRunScope {
+        run,
+        session,
+        device,
+        policy_snapshot,
+    })
+}
+
+fn nonnegative_u64(value: i64) -> Option<u64> {
+    u64::try_from(value).ok()
+}
+
+fn budget_policy_from_snapshot(snapshot: &BudgetScopeSnapshot) -> Result<BudgetPolicy, ()> {
+    if snapshot.org_id.is_empty() {
+        return Err(());
+    }
+    let scope = BudgetScope::from_parts(
+        &snapshot.scope_type,
+        &snapshot.org_id,
+        snapshot.scope_id.as_deref(),
+    )
+    .map_err(|_| ())?;
+    let limit_minor = nonnegative_u64(snapshot.limit_minor).ok_or(())?;
+    let spent_minor = nonnegative_u64(snapshot.spent_minor).ok_or(())?;
+    let live_reserved_minor = nonnegative_u64(snapshot.live_reserved_minor).ok_or(())?;
+    let period_start = canonical_instant_text(&snapshot.period_start)
+        .and_then(|value| epoch_seconds(&value))
+        .ok_or(())?;
+    let period_end = canonical_instant_text(&snapshot.period_end)
+        .and_then(|value| epoch_seconds(&value))
+        .ok_or(())?;
+    let kind = if snapshot.hard {
+        BudgetKind::Hard
+    } else {
+        BudgetKind::Soft
+    };
+    BudgetPolicy::new(scope, kind, limit_minor)
+        .with_usage(spent_minor, live_reserved_minor)
+        .try_with_period(period_start, period_end)
+        .map_err(|_| ())
+}
+
+fn most_restrictive_budget_id(snapshots: &[BudgetScopeSnapshot]) -> Option<String> {
+    snapshots
+        .iter()
+        .filter(|snapshot| snapshot.hard)
+        .min_by(|left, right| {
+            let left_remaining = left.remaining_minor().unwrap_or(i64::MIN);
+            let right_remaining = right.remaining_minor().unwrap_or(i64::MIN);
+            left_remaining
+                .cmp(&right_remaining)
+                .then_with(|| left.budget_id.cmp(&right.budget_id))
+        })
+        .map(|snapshot| snapshot.budget_id.clone())
+}
+
+async fn p05_budget_admission(
+    database: &crate::adapters::d1::D1Adapter,
+    context: &RequestContext,
+    org_id: &str,
+    project_id: &str,
+    principal_user_id: &str,
+    model_alias: &str,
+    requested_minor: u64,
+) -> Result<P05BudgetAdmission, ApiError> {
+    if requested_minor == 0 || requested_minor > MAX_RESERVATION_MINOR {
+        return Err(p05_budget_unavailable(context));
+    }
+    let now = epoch_seconds(context.received_at.as_str())
+        .ok_or_else(|| p05_budget_unavailable(context))?;
+    let snapshots = BudgetRepository::new(database)
+        .budget_scope_snapshots(
+            org_id,
+            context.received_at.as_str(),
+            Some(project_id),
+            Some(principal_user_id),
+            Some(model_alias),
+            P05_BUDGET_SNAPSHOT_LIMIT,
+        )
+        .await
+        .map_err(|_| p05_budget_unavailable(context))?;
+    if snapshots.len() >= P05_BUDGET_SNAPSHOT_LIMIT as usize {
+        return Err(p05_budget_unavailable(context));
+    }
+    let policies = snapshots
+        .iter()
+        .map(budget_policy_from_snapshot)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| p05_budget_unavailable(context))?;
+    let scope_context = ScopeContext::user(
+        org_id,
+        Some(project_id.to_owned()),
+        principal_user_id,
+        model_alias,
+    );
+    let evaluation = evaluate_budget_request(
+        &BudgetEvaluationRequest::new(scope_context, requested_minor, true, now),
+        &policies,
+    );
+    let budget_id = most_restrictive_budget_id(&snapshots);
+    let currency = budget_id
+        .as_ref()
+        .and_then(|selected| {
+            snapshots
+                .iter()
+                .find(|snapshot| &snapshot.budget_id == selected)
+        })
+        .map_or("USD", |snapshot| snapshot.currency.as_str())
+        .to_owned();
+    Ok(P05BudgetAdmission {
+        decision: evaluation.decision,
+        budget_id,
+        currency,
+    })
+}
+
+fn rate_policy_from_record(
+    record: &crate::repositories::RateLimitPolicyRecord,
+) -> Result<RateLimitPolicy, ()> {
+    let requests_per_minute = match record.requests_per_minute {
+        Some(value) => Some(nonnegative_u64(value).ok_or(())?),
+        None => None,
+    };
+    let tokens_per_minute = match record.tokens_per_minute {
+        Some(value) => Some(nonnegative_u64(value).ok_or(())?),
+        None => None,
+    };
+    let max_concurrency = record
+        .max_concurrent_requests
+        .map(|value| u32::try_from(value).map_err(|_| ()))
+        .transpose()?;
+    RateLimitPolicy::from_parts(
+        &record.scope_type,
+        &record.org_id,
+        record.scope_id.as_deref(),
+        requests_per_minute,
+        tokens_per_minute,
+        max_concurrency,
+        true,
+    )
+    .map_err(|_| ())
+}
+
+async fn p05_rate_admission(
+    database: &crate::adapters::d1::D1Adapter,
+    context: &RequestContext,
+    org_id: &str,
+    project_id: &str,
+    principal_user_id: &str,
+    model_alias: &str,
+    requested_tokens: u64,
+) -> Result<P05RateAdmission, ApiError> {
+    let repository = BudgetRepository::new(database);
+    let records = repository
+        .list_rate_limit_policies(org_id, None, None, None, P05_RATE_POLICY_LIMIT)
+        .await
+        .map_err(|_| p05_rate_unavailable(context))?;
+    if records.len() >= P05_RATE_POLICY_LIMIT as usize {
+        return Err(p05_rate_unavailable(context));
+    }
+    let policies = records
+        .iter()
+        .map(rate_policy_from_record)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| p05_rate_unavailable(context))?;
+    let scope_context = ScopeContext::user(
+        org_id,
+        Some(project_id.to_owned()),
+        principal_user_id,
+        model_alias,
+    );
+    let applicable = policies
+        .into_iter()
+        .filter(|policy| policy.matches(&scope_context))
+        .collect::<Vec<_>>();
+    if applicable.is_empty() {
+        return Ok(P05RateAdmission {
+            decision: RateLimitDecision::Allow,
+        });
+    }
+    let now =
+        epoch_seconds(context.received_at.as_str()).ok_or_else(|| p05_rate_unavailable(context))?;
+    let canonical = canonical_instant_text(context.received_at.as_str())
+        .ok_or_else(|| p05_rate_unavailable(context))?;
+    let minute = canonical
+        .get(..16)
+        .ok_or_else(|| p05_rate_unavailable(context))?;
+    let window_start = format!("{minute}:00.000Z");
+    let window_start_timestamp =
+        Timestamp::new(window_start.clone()).map_err(|_| p05_rate_unavailable(context))?;
+    let window_end = add_seconds(&window_start_timestamp, 60)
+        .map_err(|_| p05_rate_unavailable(context))?
+        .as_str()
+        .to_owned();
+    let mut states = Vec::with_capacity(applicable.len());
+    for policy in applicable {
+        if !policy.has_limits() {
+            continue;
+        }
+        let (project_filter, principal_filter, model_filter) = match policy.scope.scope_type {
+            crate::modules::budget_p05::ScopeType::Project => {
+                (policy.scope.scope_id.as_deref(), None, None)
+            }
+            crate::modules::budget_p05::ScopeType::User => {
+                (None, policy.scope.scope_id.as_deref(), None)
+            }
+            crate::modules::budget_p05::ScopeType::ServiceAccount => (None, None, None),
+            crate::modules::budget_p05::ScopeType::ModelAlias => {
+                (None, None, policy.scope.scope_id.as_deref())
+            }
+            crate::modules::budget_p05::ScopeType::Organization => (None, None, None),
+        };
+        let usage = repository
+            .rate_limit_usage(
+                org_id,
+                &window_start,
+                &window_end,
+                project_filter,
+                principal_filter,
+                model_filter,
+                i64::try_from(now).map_err(|_| p05_rate_unavailable(context))?,
+            )
+            .await
+            .map_err(|_| p05_rate_unavailable(context))?;
+        if usage.requests < 0
+            || usage.tokens < 0
+            || usage.active_inferences < 0
+            || usage.minute_started_at < 0
+        {
+            return Err(p05_rate_unavailable(context));
+        }
+        let active =
+            u32::try_from(usage.active_inferences).map_err(|_| p05_rate_unavailable(context))?;
+        states.push(RateLimitPolicyState::new(
+            policy,
+            RateLimitUsage::new(
+                u64::try_from(usage.minute_started_at)
+                    .map_err(|_| p05_rate_unavailable(context))?,
+                u64::try_from(usage.requests).map_err(|_| p05_rate_unavailable(context))?,
+                u64::try_from(usage.tokens).map_err(|_| p05_rate_unavailable(context))?,
+                active,
+            ),
+        ));
+    }
+    let decision = evaluate_rate_limit_states(
+        &scope_context,
+        &states,
+        RateLimitRequest::one(requested_tokens),
+        now,
+    )
+    .decision;
+    Ok(P05RateAdmission { decision })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_inference_denial(
+    database: &crate::adapters::d1::D1Adapter,
+    context: &RequestContext,
+    principal: Option<&Principal>,
+    org_id: &str,
+    device_id: Option<&str>,
+    run_id: Option<&str>,
+    agent_session_id: Option<&str>,
+    action: &str,
+    reason: &'static str,
+    metadata: Value,
+) {
+    let event_id = generated_id("sec");
+    let audit = security_event_statement_with_context(
+        database,
+        context,
+        principal,
+        Some(org_id),
+        &event_id,
+        action,
+        "inference",
+        run_id.or(Some(request_id_resource(context))),
+        "denied",
+        &json!({
+            "reason": reason,
+            "device_id": device_id,
+            "run_id": run_id,
+            "agent_session_id": agent_session_id,
+            "details": metadata
+        }),
+        device_id,
+        run_id,
+        agent_session_id,
+        None,
+    );
+    let outbox = outbox_statement(
+        database,
+        context,
+        principal,
+        Some(org_id),
+        action,
+        &json!({
+            "reason": reason,
+            "device_id": device_id,
+            "run_id": run_id,
+            "agent_session_id": agent_session_id,
+            "details": metadata
+        }),
+    );
+    if let (Ok(audit), Ok(outbox)) = (audit, outbox) {
+        let _ = database.batch(vec![audit, outbox]).await;
+    }
+}
+
+fn request_id_resource(context: &RequestContext) -> &str {
+    context.request_id.as_str()
+}
+
+fn attach_managed_identity_statement(
+    database: &crate::adapters::d1::D1Adapter,
+    scope: &RequestScope,
+) -> worker::Result<worker::d1::D1PreparedStatement> {
+    database.prepare(
+        ATTACH_MANAGED_INFERENCE_IDENTITY_SQL,
+        &[
+            BindValue::Text(scope.agent_session_id.as_deref().unwrap_or("")),
+            BindValue::Text(scope.agent_definition_id.as_deref().unwrap_or("")),
+            scope
+                .agent_definition_version
+                .map_or(BindValue::Null, BindValue::Int64),
+            BindValue::Text(scope.request_id.as_str()),
+            BindValue::Text(scope.org_id.as_str()),
+            BindValue::Text(scope.run_id.as_deref().unwrap_or("")),
+        ],
+    )
+}
+
+fn attach_managed_run_policy_statement(
+    database: &crate::adapters::d1::D1Adapter,
+    scope: &RequestScope,
+) -> worker::Result<worker::d1::D1PreparedStatement> {
+    database.prepare(
+        ATTACH_MANAGED_RUN_POLICY_SQL,
+        &[
+            BindValue::Text(scope.policy_snapshot_id.as_deref().unwrap_or("")),
+            scope
+                .policy_version
+                .map_or(BindValue::Null, BindValue::Int64),
+            BindValue::Text(scope.run_id.as_deref().unwrap_or("")),
+            BindValue::Text(scope.org_id.as_str()),
+        ],
+    )
+}
+
+fn p05_reservation_statement(
+    database: &crate::adapters::d1::D1Adapter,
+    scope: &RequestScope,
+    reserved_minor: i64,
+    expires_at: &str,
+    now: &str,
+    currency: &str,
+) -> worker::Result<worker::d1::D1PreparedStatement> {
+    BudgetRepository::new(database).insert_reservation_if_available_statement(
+        &NewReservationInput {
+            reservation_id: &scope.reservation_id,
+            request_id: &scope.request_id,
+            org_id: &scope.org_id,
+            reserved_minor,
+            expires_at,
+            now,
+            run_id: scope.run_id.as_deref(),
+            budget_id: scope.budget_id.as_deref(),
+            currency,
+        },
+    )
+}
+
+fn release_reservation_statement(
+    database: &crate::adapters::d1::D1Adapter,
+    scope: &RequestScope,
+    context: &RequestContext,
+    reason: &str,
+) -> worker::Result<worker::d1::D1PreparedStatement> {
+    if scope.managed_run {
+        BudgetRepository::new(database).reconcile_reservation_statement(
+            &ReservationReconcileInput {
+                reservation_id: &scope.reservation_id,
+                org_id: &scope.org_id,
+                request_id: &scope.request_id,
+                reconciled_at: context.received_at.as_str(),
+                committed_minor: None,
+                status: "released",
+                reason: Some(reason),
+                budget_id: scope.budget_id.as_deref(),
+            },
+        )
+    } else {
+        AiRepository::new(database).update_budget_reservation_statement(
+            &scope.reservation_id,
+            &scope.org_id,
+            &scope.request_id,
+            None,
+            "released",
+            &context.received_at,
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn run_inference(
     state: Arc<AppState>,
     context: RequestContext,
     headers: HeaderMap,
-    request: InferenceRequest,
+    mut request: InferenceRequest,
     format: ResponseFormat,
     caller_signal: Option<&AbortSignal>,
+    requested_agent_session_id: Option<&str>,
     policy_snapshot: Option<&PolicySnapshotEnvelope>,
 ) -> Result<Response<Body>, ApiError> {
     let org_id = required_org_id(&headers, &context)?;
@@ -417,35 +1327,96 @@ async fn run_inference(
     .await?;
     require_inference_write_proof(&headers, &access.session, &context).await?;
     validate_request_scope(&request, access.principal.session_id.as_str(), &context)?;
+    if requested_agent_session_id
+        .is_some_and(|value| crate::core::AgentSessionId::new(value).is_err())
+    {
+        return Err(validation_error(
+            &context,
+            "agent_session_scope_invalid",
+            "The agent session scope is invalid.",
+        ));
+    }
+    if request.run_id.is_none() && requested_agent_session_id.is_some() {
+        return Err(validation_error(
+            &context,
+            "agent_session_scope_invalid",
+            "An agent session requires a correlated run.",
+        ));
+    }
     let database = database(&state, &context)?;
+    let managed_scope = if let Some(run_id) = request.run_id.as_deref() {
+        let managed = resolve_managed_run_scope(
+            &state,
+            &headers,
+            &context,
+            &access.principal,
+            &org_id,
+            run_id,
+            &request.model,
+            requested_agent_session_id,
+        )
+        .await?;
+        if request
+            .project_id
+            .as_deref()
+            .is_some_and(|project_id| project_id != managed.run.project_id)
+        {
+            return Err(p05_scope_error(&context));
+        }
+        request.project_id = Some(managed.run.project_id.clone());
+        Some(managed)
+    } else {
+        None
+    };
     let repository = AiRepository::new(database);
     let policy_record = repository
         .find_policy(&org_id)
         .await
         .map_err(|error| database_error(&context, error))?;
+    if managed_scope.is_some() && policy_record.is_none() {
+        return Err(gateway_error(&context, "model_not_allowed"));
+    }
     let (mut policy, mut credential_mode) =
         policy_from_record(policy_record.as_ref(), state.environment.as_str());
-    // P03 owns the persisted, signed/versioned policy transport. Resolve it
-    // server-side after authorization; never treat a client-supplied snapshot
-    // as policy authority. The optional extension remains an internal test
-    // seam only when the database has no snapshot.
-    let trusted_snapshot = match policy_snapshot {
-        Some(snapshot) if snapshot.org_id == org_id => Some(snapshot.clone()),
-        Some(_) => return Err(gateway_error(&context, "model_not_allowed")),
-        None => load_trusted_policy_snapshot(database, &org_id, &context).await?,
+    // P03 owns the persisted, signed/versioned policy transport. A managed run
+    // never uses the optional test seam as authority: it has already loaded the
+    // current server snapshot while resolving the run. Unmanaged requests keep
+    // the P04 fallback behavior.
+    let trusted_snapshot = if let Some(managed) = managed_scope.as_ref() {
+        if policy_snapshot.is_some_and(|snapshot| snapshot.org_id != org_id) {
+            return Err(gateway_error(&context, "model_not_allowed"));
+        }
+        Some(managed.policy_snapshot.clone())
+    } else {
+        match policy_snapshot {
+            Some(snapshot) if snapshot.org_id == org_id => Some(snapshot.clone()),
+            Some(_) => return Err(gateway_error(&context, "model_not_allowed")),
+            None => load_trusted_policy_snapshot(database, &org_id, &context).await?,
+        }
     };
     if let Some(snapshot) = trusted_snapshot.as_ref() {
         let (snapshot_policy, snapshot_mode) = snapshot.apply_to(policy, credential_mode);
         policy = snapshot_policy;
         credential_mode = snapshot_mode;
     }
-    let effective_project_id = trusted_snapshot
+    let effective_project_id = managed_scope
         .as_ref()
-        .and_then(|snapshot| snapshot.trusted_project_id().map(str::to_owned));
-    let effective_device_id = trusted_snapshot
+        .map(|managed| Some(managed.run.project_id.clone()))
+        .unwrap_or_else(|| {
+            trusted_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.trusted_project_id().map(str::to_owned))
+        });
+    let effective_device_id = managed_scope
         .as_ref()
-        .and_then(|snapshot| snapshot.trusted_device_id().map(str::to_owned));
+        .map(|managed| Some(managed.device.device_id.clone()))
+        .unwrap_or_else(|| {
+            trusted_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.trusted_device_id().map(str::to_owned))
+        });
     if let Some(snapshot) = trusted_snapshot.as_ref()
+        && managed_scope.is_none()
         && let Some(trusted_project_id) = snapshot.trusted_project_id()
         && request
             .project_id
@@ -547,46 +1518,160 @@ async fn run_inference(
     .map_err(|error| gateway_error(&context, route_error_reason(error)))?;
 
     // A missing output cap is still bounded for reservation purposes. The
-    // provider may return fewer tokens, but the pre-dispatch hook must not
+    // provider may return fewer tokens, but the pre-dispatch gate must never
     // reserve an unbounded amount.
-    let reservation_minor = i64::from(
-        estimated_input_tokens
-            .saturating_add(estimated_output_tokens)
-            .min(1_000_000),
-    );
-    let budget_request = BudgetRequest {
-        organization_id: org_id.clone(),
-        project_id: effective_project_id.clone(),
-        principal_user_id: access.principal.user_id.as_str().to_owned(),
-        model_alias: request.model.clone(),
-        estimated_input_tokens,
-        estimated_output_tokens,
-    };
-    let budget_decision = AllowAllBudgetHook.decide(&budget_request);
-    let budget_decision_value = match budget_decision {
-        BudgetDecision::Allow => "allow",
-        BudgetDecision::Deny => return Err(gateway_error(&context, "budget_exceeded")),
-        BudgetDecision::Unavailable => {
-            return Err(gateway_error(&context, "budget_state_unavailable"));
-        }
-    };
-    match repository
-        .hard_budget_remaining(&org_id, context.received_at.as_str())
-        .await
-    {
-        Ok(Some(remaining)) if remaining < reservation_minor => {
-            return Err(gateway_error(&context, "budget_exceeded"));
-        }
-        Ok(_) => {}
-        Err(_) => return Err(gateway_error(&context, "budget_state_unavailable")),
-    }
+    let reservation_minor = i64::try_from(
+        u64::from(estimated_input_tokens)
+            .saturating_add(u64::from(estimated_output_tokens))
+            .min(P05_MAX_RESERVATION_TOKENS),
+    )
+    .map_err(|_| p05_budget_unavailable(&context))?;
+    let managed_project_id = managed_scope
+        .as_ref()
+        .map(|managed| managed.run.project_id.as_str());
+    let managed_device_id = managed_scope
+        .as_ref()
+        .map(|managed| managed.device.device_id.as_str());
+    let managed_agent_session_id = managed_scope
+        .as_ref()
+        .map(|managed| managed.session.agent_session_id.as_str());
+    let managed_run_id = managed_scope
+        .as_ref()
+        .map(|managed| managed.run.run_id.as_str());
+    let (budget_decision_value, budget_id, budget_currency) =
+        if let Some(project_id) = managed_project_id {
+            let requested_tokens =
+                u64::try_from(reservation_minor).map_err(|_| p05_budget_unavailable(&context))?;
+            let rate_admission = p05_rate_admission(
+                database,
+                &context,
+                &org_id,
+                project_id,
+                access.principal.user_id.as_str(),
+                &request.model,
+                requested_tokens,
+            )
+            .await?;
+            let rate_reason = match &rate_admission.decision {
+                RateLimitDecision::Allow => None,
+                RateLimitDecision::Deny(violation)
+                    if violation.dimension == RateLimitDimension::Concurrency =>
+                {
+                    Some("concurrency_limit_exceeded")
+                }
+                RateLimitDecision::Deny(_) => Some("rate_limit_exceeded"),
+                RateLimitDecision::Unavailable => Some("rate_limit_state_unavailable"),
+            };
+            if let Some(reason) = rate_reason {
+                record_inference_denial(
+                    database,
+                    &context,
+                    Some(&access.principal),
+                    &org_id,
+                    managed_device_id,
+                    managed_run_id,
+                    managed_agent_session_id,
+                    "rate_limit.denied.v1",
+                    reason,
+                    json!({ "model_alias": request.model, "requested_tokens": requested_tokens }),
+                )
+                .await;
+                return Err(if reason == "rate_limit_state_unavailable" {
+                    p05_rate_unavailable(&context)
+                } else {
+                    p05_error(
+                        &context,
+                        ApiErrorCode::RateLimited,
+                        reason,
+                        "The request rate limit does not allow this inference.",
+                    )
+                });
+            }
+            let budget_admission = p05_budget_admission(
+                database,
+                &context,
+                &org_id,
+                project_id,
+                access.principal.user_id.as_str(),
+                &request.model,
+                requested_tokens,
+            )
+            .await?;
+            match budget_admission.decision {
+                P05BudgetDecision::Allow | P05BudgetDecision::SoftLimit => (
+                    budget_admission.decision.as_str().to_owned(),
+                    budget_admission.budget_id,
+                    budget_admission.currency,
+                ),
+                P05BudgetDecision::Deny => {
+                    record_inference_denial(
+                    database,
+                    &context,
+                    Some(&access.principal),
+                    &org_id,
+                    managed_device_id,
+                    managed_run_id,
+                    managed_agent_session_id,
+                    "budget.denied.v1",
+                    "budget_exceeded",
+                    json!({ "model_alias": request.model, "reserved_minor": reservation_minor }),
+                )
+                .await;
+                    return Err(p05_error(
+                        &context,
+                        ApiErrorCode::PermissionDenied,
+                        "budget_exceeded",
+                        "The organization budget does not allow this request.",
+                    ));
+                }
+                P05BudgetDecision::Unavailable => {
+                    record_inference_denial(
+                        database,
+                        &context,
+                        Some(&access.principal),
+                        &org_id,
+                        managed_device_id,
+                        managed_run_id,
+                        managed_agent_session_id,
+                        "budget.denied.v1",
+                        "budget_state_unavailable",
+                        json!({ "model_alias": request.model }),
+                    )
+                    .await;
+                    return Err(p05_budget_unavailable(&context));
+                }
+            }
+        } else {
+            // No managed run means the caller is explicitly on the P04/local
+            // compatibility path. Keep its organization-level precheck and
+            // conditional reservation semantics, but do not pretend P05 scope
+            // enforcement happened.
+            match repository
+                .hard_budget_remaining(&org_id, context.received_at.as_str())
+                .await
+            {
+                Ok(Some(remaining)) if remaining < reservation_minor => {
+                    return Err(gateway_error(&context, "budget_exceeded"));
+                }
+                Ok(_) => {}
+                Err(_) => return Err(gateway_error(&context, "budget_state_unavailable")),
+            }
+            ("allow".to_owned(), None, "USD".to_owned())
+        };
 
     let reservation_id = new_resource_id("bud").as_str().to_owned();
     // Keep the reservation alive beyond the maximum bounded route attempt
     // window; P05 owns authoritative expiry/reconciliation policy.
-    let reservation_expires_at = add_seconds(&context.received_at, 3_600)
-        .map_err(|_| gateway_error(&context, "budget_state_unavailable"))?;
+    let reservation_expires_at = add_seconds(&context.received_at, P05_RESERVATION_TTL_SECONDS)
+        .map_err(|_| {
+            if managed_scope.is_some() {
+                p05_budget_unavailable(&context)
+            } else {
+                gateway_error(&context, "budget_state_unavailable")
+            }
+        })?;
     let scope = RequestScope {
+        request_id: context.request_id.as_str().to_owned(),
         org_id: org_id.clone(),
         project_id: effective_project_id.clone(),
         session_id: request
@@ -595,27 +1680,61 @@ async fn run_inference(
             .unwrap_or_else(|| access.principal.session_id.as_str().to_owned()),
         device_id: effective_device_id,
         run_id: request.run_id.clone(),
+        agent_session_id: managed_scope
+            .as_ref()
+            .map(|managed| managed.session.agent_session_id.clone()),
+        agent_definition_id: managed_scope
+            .as_ref()
+            .map(|managed| managed.run.agent_definition_id.clone()),
+        agent_definition_version: managed_scope
+            .as_ref()
+            .map(|managed| managed.run.agent_definition_version),
+        workspace_binding_id: managed_scope
+            .as_ref()
+            .and_then(|managed| managed.run.workspace_binding_id.clone()),
+        policy_snapshot_id: managed_scope
+            .as_ref()
+            .map(|managed| managed.policy_snapshot.policy_id.clone()),
+        policy_version: managed_scope
+            .as_ref()
+            .map(|managed| managed.policy_snapshot.policy_version),
+        managed_run: managed_scope.is_some(),
         model_alias: request.model.clone(),
         route_id: route.route_id.clone(),
         route_version_id: version.route_version_id.clone(),
         route_version_number: version.version_number,
         reservation_id: reservation_id.clone(),
+        reserved_minor: reservation_minor,
+        budget_id,
+        currency: budget_currency.clone(),
         principal_user_id: access.principal.user_id.as_str().to_owned(),
         credential_mode,
     };
-    let reservation_statement = repository
-        .insert_budget_reservation_if_available_statement(
-            &scope.reservation_id,
-            context.request_id.as_str(),
-            &scope.org_id,
+    let reservation_statement = if scope.managed_run {
+        p05_reservation_statement(
+            database,
+            &scope,
             reservation_minor,
             reservation_expires_at.as_str(),
-            &context.received_at,
+            context.received_at.as_str(),
+            &budget_currency,
         )
-        .map_err(|error| database_error(&context, error))?;
+        .map_err(|error| database_error(&context, error))?
+    } else {
+        repository
+            .insert_budget_reservation_if_available_statement(
+                &scope.reservation_id,
+                &scope.request_id,
+                &scope.org_id,
+                reservation_minor,
+                reservation_expires_at.as_str(),
+                &context.received_at,
+            )
+            .map_err(|error| database_error(&context, error))?
+    };
     let request_statement = repository
         .insert_inference_request_statement(
-            context.request_id.as_str(),
+            &scope.request_id,
             &scope.org_id,
             scope.project_id.as_deref(),
             scope.run_id.as_deref(),
@@ -628,7 +1747,23 @@ async fn run_inference(
             &context.received_at,
         )
         .map_err(|error| database_error(&context, error))?;
-    let request_event = security_event_statement(
+    let identity_statement = if scope.managed_run {
+        Some(
+            attach_managed_identity_statement(database, &scope)
+                .map_err(|error| database_error(&context, error))?,
+        )
+    } else {
+        None
+    };
+    let run_policy_statement = if scope.managed_run {
+        Some(
+            attach_managed_run_policy_statement(database, &scope)
+                .map_err(|error| database_error(&context, error))?,
+        )
+    } else {
+        None
+    };
+    let request_event = security_event_statement_with_context(
         database,
         &context,
         Some(&access.principal),
@@ -638,7 +1773,19 @@ async fn run_inference(
         "model_alias",
         Some(&scope.model_alias),
         "success",
-        &json!({"route_version_id": scope.route_version_id, "stream": request.stream}),
+        &json!({
+            "route_version_id": scope.route_version_id,
+            "stream": request.stream,
+            "project_id": scope.project_id,
+            "device_id": scope.device_id,
+            "run_id": scope.run_id,
+            "agent_session_id": scope.agent_session_id,
+            "workspace_binding_id": scope.workspace_binding_id,
+        }),
+        scope.device_id.as_deref(),
+        scope.run_id.as_deref(),
+        scope.agent_session_id.as_deref(),
+        None,
     )?;
     let request_outbox = outbox_statement(
         database,
@@ -646,15 +1793,33 @@ async fn run_inference(
         Some(&access.principal),
         Some(&scope.org_id),
         "inference.requested.v1",
-        &json!({"route_version_id": scope.route_version_id, "stream": request.stream}),
+        &json!({
+            "route_version_id": scope.route_version_id,
+            "stream": request.stream,
+            "project_id": scope.project_id,
+            "device_id": scope.device_id,
+            "run_id": scope.run_id,
+            "agent_session_id": scope.agent_session_id,
+            "workspace_binding_id": scope.workspace_binding_id,
+        }),
     )?;
-    let initial_results = database
-        .batch(vec![request_statement, reservation_statement])
-        .await
-        .map_err(|_error| gateway_error(&context, "budget_state_unavailable"))?;
+    let mut initial_statements = vec![request_statement, reservation_statement];
+    if let Some(identity_statement) = identity_statement {
+        initial_statements.push(identity_statement);
+    }
+    if let Some(run_policy_statement) = run_policy_statement {
+        initial_statements.push(run_policy_statement);
+    }
+    let initial_results = database.batch(initial_statements).await.map_err(|_error| {
+        if scope.managed_run {
+            p05_budget_unavailable(&context)
+        } else {
+            gateway_error(&context, "budget_state_unavailable")
+        }
+    })?;
     if crate::adapters::d1::D1Adapter::changes(&initial_results[1]).unwrap_or_default() != 1 {
         if let Ok(statement) = repository.update_inference_request_statement(
-            context.request_id.as_str(),
+            &scope.request_id,
             &scope.org_id,
             None,
             None,
@@ -667,11 +1832,63 @@ async fn run_inference(
         ) {
             let _ = database.batch(vec![statement]).await;
         }
-        return Err(gateway_error(&context, "budget_exceeded"));
+        if scope.managed_run {
+            record_inference_denial(
+                database,
+                &context,
+                Some(&access.principal),
+                &org_id,
+                scope.device_id.as_deref(),
+                scope.run_id.as_deref(),
+                scope.agent_session_id.as_deref(),
+                "budget.denied.v1",
+                "budget_exceeded",
+                json!({ "model_alias": scope.model_alias, "reserved_minor": reservation_minor }),
+            )
+            .await;
+        }
+        return Err(if scope.managed_run {
+            p05_error(
+                &context,
+                ApiErrorCode::PermissionDenied,
+                "budget_exceeded",
+                "The organization budget does not allow this request.",
+            )
+        } else {
+            gateway_error(&context, "budget_exceeded")
+        });
+    }
+    if scope.managed_run
+        && (crate::adapters::d1::D1Adapter::changes(&initial_results[2]).unwrap_or_default() != 1
+            || crate::adapters::d1::D1Adapter::changes(&initial_results[3]).unwrap_or_default()
+                != 1)
+    {
+        let cleanup_request = repository.update_inference_request_statement(
+            &scope.request_id,
+            &scope.org_id,
+            None,
+            None,
+            None,
+            "failed",
+            0,
+            None,
+            Some(context.received_at.as_str()),
+            Some("resource_scope_mismatch"),
+        );
+        let cleanup_reservation =
+            release_reservation_statement(database, &scope, &context, "identity_mismatch");
+        if let (Ok(cleanup_request), Ok(cleanup_reservation)) =
+            (cleanup_request, cleanup_reservation)
+        {
+            let _ = database
+                .batch(vec![cleanup_request, cleanup_reservation])
+                .await;
+        }
+        return Err(p05_scope_error(&context));
     }
     if let Err(error) = database.batch(vec![request_event, request_outbox]).await {
-        if let Ok(cleanup_request) = repository.update_inference_request_statement(
-            context.request_id.as_str(),
+        let cleanup_request = repository.update_inference_request_statement(
+            &scope.request_id,
             &scope.org_id,
             None,
             None,
@@ -681,19 +1898,26 @@ async fn run_inference(
             None,
             Some(context.received_at.as_str()),
             Some("provider_unavailable"),
-        ) && let Ok(cleanup_reservation) = repository.update_budget_reservation_statement(
-            &scope.reservation_id,
-            &scope.org_id,
-            context.request_id.as_str(),
-            None,
-            "released",
-            &context.received_at,
-        ) {
+        );
+        let cleanup_reservation =
+            release_reservation_statement(database, &scope, &context, "event_write_failed");
+        if let (Ok(cleanup_request), Ok(cleanup_reservation)) =
+            (cleanup_request, cleanup_reservation)
+        {
             let _ = database
                 .batch(vec![cleanup_request, cleanup_reservation])
                 .await;
         }
-        return Err(database_error(&context, error));
+        return Err(if scope.managed_run {
+            p05_error(
+                &context,
+                ApiErrorCode::ServiceUnavailable,
+                "run_state_unavailable",
+                "The inference state could not be recorded.",
+            )
+        } else {
+            database_error(&context, error)
+        });
     }
 
     let mut last_error = AdapterErrorKind::ProviderUnavailable;
@@ -820,6 +2044,9 @@ async fn run_inference(
             route_version_id: scope.route_version_id.clone(),
             route_version_number: scope.route_version_number,
             reservation_id: scope.reservation_id.clone(),
+            reserved_minor: scope.reserved_minor,
+            budget_id: scope.budget_id.clone(),
+            currency: scope.currency.clone(),
             provider_id: candidate.provider_id.clone(),
             model_id: candidate.model_id.clone(),
             provider_request_id: None,
@@ -828,6 +2055,13 @@ async fn run_inference(
             run_id: scope.run_id.clone(),
             session_id: scope.session_id.clone(),
             device_id: scope.device_id.clone(),
+            agent_session_id: scope.agent_session_id.clone(),
+            agent_definition_id: scope.agent_definition_id.clone(),
+            agent_definition_version: scope.agent_definition_version,
+            workspace_binding_id: scope.workspace_binding_id.clone(),
+            policy_snapshot_id: scope.policy_snapshot_id.clone(),
+            policy_version: scope.policy_version,
+            managed_run: scope.managed_run,
             principal_user_id: scope.principal_user_id.clone(),
             org_id: scope.org_id.clone(),
             credential_id: Some(credential.credential_id.clone()),
@@ -1108,6 +2342,9 @@ async fn run_inference(
         route_version_id: scope.route_version_id.clone(),
         route_version_number: scope.route_version_number,
         reservation_id: scope.reservation_id.clone(),
+        reserved_minor: scope.reserved_minor,
+        budget_id: scope.budget_id.clone(),
+        currency: scope.currency.clone(),
         provider_id: String::new(),
         model_id: String::new(),
         provider_request_id: None,
@@ -1116,6 +2353,13 @@ async fn run_inference(
         run_id: scope.run_id.clone(),
         session_id: scope.session_id.clone(),
         device_id: scope.device_id.clone(),
+        agent_session_id: scope.agent_session_id.clone(),
+        agent_definition_id: scope.agent_definition_id.clone(),
+        agent_definition_version: scope.agent_definition_version,
+        workspace_binding_id: scope.workspace_binding_id.clone(),
+        policy_snapshot_id: scope.policy_snapshot_id.clone(),
+        policy_version: scope.policy_version,
+        managed_run: scope.managed_run,
         principal_user_id: scope.principal_user_id.clone(),
         org_id: scope.org_id.clone(),
         credential_id: None,
@@ -2153,16 +3397,35 @@ async fn finalize_request(
         })
         .transpose()
         .map_err(|error| database_error(context, error))?;
-    let reservation_update = AiRepository::new(database)
-        .update_budget_reservation_statement(
-            &metadata.reservation_id,
-            &metadata.org_id,
-            &metadata.request_id,
-            success.then_some(0),
-            if success { "committed" } else { "released" },
-            &context.received_at,
-        )
-        .map_err(|error| database_error(context, error))?;
+    let reservation_update = if metadata.managed_run {
+        BudgetRepository::new(database)
+            .reconcile_reservation_statement(&ReservationReconcileInput {
+                reservation_id: &metadata.reservation_id,
+                org_id: &metadata.org_id,
+                request_id: &metadata.request_id,
+                reconciled_at: completed_at,
+                committed_minor: success.then_some(metadata.reserved_minor),
+                status: if success { "committed" } else { "released" },
+                reason: Some(if success {
+                    "inference_completed"
+                } else {
+                    "inference_failed"
+                }),
+                budget_id: metadata.budget_id.as_deref(),
+            })
+            .map_err(|error| database_error(context, error))?
+    } else {
+        AiRepository::new(database)
+            .update_budget_reservation_statement(
+                &metadata.reservation_id,
+                &metadata.org_id,
+                &metadata.request_id,
+                success.then_some(0),
+                if success { "committed" } else { "released" },
+                &context.received_at,
+            )
+            .map_err(|error| database_error(context, error))?
+    };
     let mut statements = vec![update, reservation_update];
     if let Some(credential_update) = credential_update {
         statements.push(credential_update);
@@ -2188,9 +3451,11 @@ async fn finalize_request(
                 usage.and_then(|value| value.output_tokens).map(i64::from),
                 usage.and_then(|value| value.cached_tokens).map(i64::from),
                 &usage_json(usage).to_string(),
-                None,
-                usage.and_then(|value| value.output_tokens).map(|_| 0),
-                Some("USD"),
+                metadata.managed_run.then_some(metadata.reserved_minor),
+                (!metadata.managed_run)
+                    .then(|| usage.and_then(|value| value.output_tokens).map(|_| 0))
+                    .flatten(),
+                Some(&metadata.currency),
                 usage.and_then(|value| value.pricing_version.as_deref()),
                 &metadata.budget_decision,
                 metadata.ttft_ms,
@@ -2202,12 +3467,17 @@ async fn finalize_request(
         let usage_metadata = json!({
             "usage_event_id": usage_id.as_str(),
             "request_id": metadata.request_id,
+            "project_id": metadata.project_id,
+            "device_id": metadata.device_id,
+            "run_id": metadata.run_id,
+            "agent_session_id": metadata.agent_session_id,
+            "workspace_binding_id": metadata.workspace_binding_id,
             "input_tokens": usage.and_then(|value| value.input_tokens),
             "output_tokens": usage.and_then(|value| value.output_tokens),
             "budget_decision": metadata.budget_decision
         });
         let usage_event_id = new_resource_id("sec").as_str().to_owned();
-        statements.push(security_event_statement(
+        statements.push(security_event_statement_with_context(
             database,
             context,
             None,
@@ -2218,6 +3488,10 @@ async fn finalize_request(
             Some(usage_id.as_str()),
             "success",
             &usage_metadata,
+            metadata.device_id.as_deref(),
+            metadata.run_id.as_deref(),
+            metadata.agent_session_id.as_deref(),
+            None,
         )?);
         statements.push(outbox_statement(
             database,
@@ -2228,14 +3502,29 @@ async fn finalize_request(
             &usage_metadata,
         )?);
     }
-    let event_metadata = json!({"provider_id": metadata.provider_id, "model_id": metadata.model_id, "fallback_count": metadata.fallback_count, "usage": usage_json(usage)});
+    let event_metadata = json!({
+        "provider_id": metadata.provider_id,
+        "model_id": metadata.model_id,
+        "fallback_count": metadata.fallback_count,
+        "project_id": metadata.project_id,
+        "device_id": metadata.device_id,
+        "run_id": metadata.run_id,
+        "agent_session_id": metadata.agent_session_id,
+        "agent_definition_id": metadata.agent_definition_id,
+        "agent_definition_version": metadata.agent_definition_version,
+        "workspace_binding_id": metadata.workspace_binding_id,
+        "policy_snapshot_id": metadata.policy_snapshot_id,
+        "policy_version": metadata.policy_version,
+        "usage": usage_json(usage),
+        "budget_decision": metadata.budget_decision,
+    });
     let action = if success {
         "inference.completed.v1"
     } else {
         "inference.failed.v1"
     };
     let event_id = new_resource_id("sec").as_str().to_owned();
-    statements.push(security_event_statement(
+    statements.push(security_event_statement_with_context(
         database,
         context,
         None,
@@ -2246,6 +3535,10 @@ async fn finalize_request(
         Some(&metadata.request_id),
         if success { "success" } else { "failure" },
         &event_metadata,
+        metadata.device_id.as_deref(),
+        metadata.run_id.as_deref(),
+        metadata.agent_session_id.as_deref(),
+        None,
     )?);
     statements.push(outbox_statement(
         database,
@@ -2657,9 +3950,11 @@ fn validate_request_scope(
             "The project scope is invalid.",
         ));
     }
-    if request.run_id.as_ref().is_some_and(|value| {
-        value.is_empty() || value.len() > 255 || value.chars().any(char::is_control)
-    }) {
+    if request
+        .run_id
+        .as_deref()
+        .is_some_and(|value| crate::core::RunId::new(value).is_err())
+    {
         return Err(validation_error(
             context,
             "run_scope_invalid",
@@ -2841,8 +4136,19 @@ fn gateway_error(context: &RequestContext, reason: &str) -> ApiError {
         "model_not_allowed"
         | "unsupported_capability"
         | "credential_unavailable"
-        | "budget_exceeded" => ApiErrorCode::PermissionDenied,
-        "provider_rate_limited" => ApiErrorCode::RateLimited,
+        | "budget_exceeded"
+        | "resource_scope_mismatch"
+        | "device_revoked"
+        | "device_not_approved"
+        | "run_not_managed" => ApiErrorCode::PermissionDenied,
+        "run_not_found" | "session_not_found" | "agent_not_found" | "project_not_found"
+        | "device_not_found" | "resource_not_found" => ApiErrorCode::NotFound,
+        "run_terminal" | "invalid_run_transition" | "session_closed" | "project_archived" => {
+            ApiErrorCode::Conflict
+        }
+        "provider_rate_limited" | "rate_limit_exceeded" | "concurrency_limit_exceeded" => {
+            ApiErrorCode::RateLimited
+        }
         _ => ApiErrorCode::ServiceUnavailable,
     };
     domain_error(
@@ -2929,6 +4235,67 @@ mod tests {
             &mut usage
         ));
         assert_eq!(text, "anthropic");
+    }
+
+    #[test]
+    fn p05_managed_policy_scope_is_server_owned_and_exact() {
+        let payload = json!({
+            "org_access": { "member": true },
+            "projects": { "bindings": ["prj_1", "prj_2"] },
+            "device_id": "dvc_1",
+        });
+        assert!(p05_policy_scope_matches(&payload, "prj_2", "dvc_1"));
+        assert!(!p05_policy_scope_matches(&payload, "prj_other", "dvc_1"));
+        assert!(!p05_policy_scope_matches(&payload, "prj_1", "dvc_other"));
+        let mut stale_member = payload.clone();
+        stale_member["org_access"]["member"] = json!(false);
+        assert!(!p05_policy_scope_matches(&stale_member, "prj_1", "dvc_1"));
+    }
+
+    #[test]
+    fn p05_budget_snapshot_projection_keeps_scope_and_usage_authoritative() {
+        let snapshot = BudgetScopeSnapshot {
+            budget_id: "bud_1".to_owned(),
+            org_id: "org_1".to_owned(),
+            scope_type: "project".to_owned(),
+            scope_id: Some("prj_1".to_owned()),
+            period_start: "2026-09-01T00:00:00.000Z".to_owned(),
+            period_end: "2026-10-01T00:00:00.000Z".to_owned(),
+            limit_minor: 10,
+            hard: true,
+            version: 1,
+            currency: "USD".to_owned(),
+            created_at: "2026-09-01T00:00:00.000Z".to_owned(),
+            updated_at: "2026-09-01T00:00:00.000Z".to_owned(),
+            spent_minor: 6,
+            live_reserved_minor: 2,
+        };
+        let policy = budget_policy_from_snapshot(&snapshot).expect("valid P05 budget row");
+        assert_eq!(policy.scope.scope_type.as_str(), "project");
+        assert_eq!(policy.committed_minor, 6);
+        assert_eq!(policy.reserved_minor, 2);
+        let context = ScopeContext::user("org_1", Some("prj_1".to_owned()), "usr_1", "alias");
+        let evaluation = evaluate_budget_request(
+            &BudgetEvaluationRequest::new(
+                context,
+                3,
+                true,
+                epoch_seconds("2026-09-25T00:00:00.000Z").unwrap(),
+            ),
+            &[policy],
+        );
+        assert_eq!(evaluation.decision, P05BudgetDecision::Deny);
+    }
+
+    #[test]
+    fn p05_timestamp_projection_is_fixed_width_and_ordered() {
+        assert_eq!(
+            canonical_instant_text("2026-09-25T12:00:00Z").as_deref(),
+            Some("2026-09-25T12:00:00.000Z")
+        );
+        let first = epoch_seconds("2026-09-25T12:00:00.000Z").unwrap();
+        let second = epoch_seconds("2026-09-25T12:00:01.000Z").unwrap();
+        assert_eq!(second, first + 1);
     }
 
     #[test]

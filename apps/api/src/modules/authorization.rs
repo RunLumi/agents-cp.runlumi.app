@@ -721,14 +721,16 @@ mod tests {
             membership_id.clone(),
             MembershipRole::Member,
         );
-        assert!(authorize(
-            Some(&user),
-            &organization,
-            Some(&member),
-            &Permission::RunsStart,
-            None
-        )
-        .is_allowed());
+        assert!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&member),
+                &Permission::RunsStart,
+                None
+            )
+            .is_allowed()
+        );
         assert_eq!(
             authorize(
                 Some(&user),
@@ -741,14 +743,16 @@ mod tests {
         );
 
         let viewer = make_membership(org, user_id, membership_id, MembershipRole::Viewer);
-        assert!(authorize(
-            Some(&user),
-            &organization,
-            Some(&viewer),
-            &Permission::RunsRead,
-            None
-        )
-        .is_allowed());
+        assert!(
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&viewer),
+                &Permission::RunsRead,
+                None
+            )
+            .is_allowed()
+        );
         assert_eq!(
             authorize(
                 Some(&user),
