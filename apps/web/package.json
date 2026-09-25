@@ -1,8 +1,8 @@
 {
   "name": "@runlumi/agents-cp-web",
   "version": "0.0.0",
-  "license": "UNLICENSED",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "dev": "vite",
