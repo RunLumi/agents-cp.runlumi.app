@@ -557,11 +557,17 @@ pub async fn complete_enrollment(
             token_expires_at.as_str(),
             &context.received_at,
         )
-        .map_err(|error| database_error(&context, error))?;
-    database
-        .batch(statements)
-        .await
-        .map_err(|error| database_error(&context, error))?;
+        .map_err(|error| {
+            worker::console_log!(
+                "complete prepare failed: {:?}",
+                worker::Error::RustError(error.to_string())
+            );
+            database_error(&context, error)
+        })?;
+    database.batch(statements).await.map_err(|error| {
+        worker::console_log!("complete batch failed: {}", error.to_string());
+        database_error(&context, error)
+    })?;
     let device = DeviceRepository::new(database)
         .find_device(&device_id)
         .await
@@ -1264,7 +1270,11 @@ pub async fn approve_enrollment(
         .await
         .map_err(|_| service_unavailable(&context))?
         .ok_or_else(|| service_unavailable(&context))?;
-    Ok((StatusCode::CREATED, Json(json!({ "device": device_json(&device) }))).into_response())
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "device": device_json(&device) })),
+    )
+        .into_response())
 }
 
 #[worker::send]

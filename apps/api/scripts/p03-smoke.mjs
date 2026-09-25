@@ -16,12 +16,7 @@
 // Usage: wrangler dev --env development on :8787, then `pnpm smoke:p03`.
 
 import assert from "node:assert/strict";
-import {
-  createHash,
-  generateKeyPairSync,
-  randomUUID,
-  sign,
-} from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 
 const baseUrl = process.env.P03_API_BASE ?? "http://127.0.0.1:8787";
 
@@ -167,6 +162,7 @@ const run = async () => {
     {},
     { ...csrf, "Idempotency-Key": `approve-${enrollmentId}` },
   );
+  if (result.status !== 201) console.error("approve payload:", JSON.stringify(result.payload));
   assert.equal(result.status, 201);
   const deviceId = result.payload.device.id;
   check("3. admin approved the enrollment", Boolean(deviceId));
@@ -175,10 +171,28 @@ const run = async () => {
   const challenge = result.payload.challenge;
   assert.equal(result.payload.status, "approved");
   assert.equal(typeof challenge, "string");
+  // Wrong proof fails before the right one is accepted.
+  result = await request(
+    new CookieJar(),
+    "POST",
+    `/api/v1/devices/enrollments/${enrollmentId}/complete`,
+    {
+      signature: "00".repeat(64),
+    },
+  );
+  assert.equal(result.status, 403);
+  assert.equal(result.payload.error.details.reason, "device_proof_invalid");
+  check("4a. invalid proof denied with stable reason", true);
+
   const signature = device.sign(challenge);
-  result = await request(new CookieJar(), "POST", `/api/v1/devices/enrollments/${enrollmentId}/complete`, {
-    signature,
-  });
+  result = await request(
+    new CookieJar(),
+    "POST",
+    `/api/v1/devices/enrollments/${enrollmentId}/complete`,
+    {
+      signature,
+    },
+  );
   assert.equal(result.status, 201);
   const deviceToken = result.payload.device_token;
   assert.equal(result.payload.device.id, deviceId);
@@ -186,26 +200,30 @@ const run = async () => {
 
   const deviceHeaders = { Authorization: `DeviceToken ${deviceToken}` };
 
-  // Negative: replaying completion fails.
-  result = await request(new CookieJar(), "POST", `/api/v1/devices/enrollments/${enrollmentId}/complete`, {
-    signature,
-  });
-  assert.notEqual(result.status, 201);
+  // Negative: replaying completion after completion fails.
+  result = await request(
+    new CookieJar(),
+    "POST",
+    `/api/v1/devices/enrollments/${enrollmentId}/complete`,
+    {
+      signature,
+    },
+  );
+  assert.equal(result.status, 403);
+  assert.equal(result.payload.error.details.reason, "enrollment_expired");
   check("4b. completion replay is rejected", true);
 
-  // Wrong proof fails.
-  result = await request(new CookieJar(), "POST", `/api/v1/devices/enrollments/${enrollmentId}/complete`, {
-    signature: "00".repeat(64),
-  });
-  assert.equal(result.status, 403);
-  assert.equal(result.payload.error.details.reason, "device_proof_invalid");
-  check("4c. invalid proof denied with stable reason", true);
-
   // 5. Device heartbeat + create project + bind workspace.
-  result = await request(new CookieJar(), "POST", "/api/v1/devices/heartbeat", {
-    app_version: device.appVersion,
-    capabilities: { browser_use: true, computer_use: false, runtime_version: "1.0.0" },
-  }, deviceHeaders);
+  result = await request(
+    new CookieJar(),
+    "POST",
+    "/api/v1/devices/heartbeat",
+    {
+      app_version: device.appVersion,
+      capabilities: { browser_use: true, computer_use: false, runtime_version: "1.0.0" },
+    },
+    deviceHeaders,
+  );
   assert.equal(result.status, 200);
   check("5. heartbeat accepted with bounded capabilities", true);
 
@@ -220,23 +238,35 @@ const run = async () => {
   const projectId = result.payload.id;
   check("6. project created", Boolean(projectId));
 
-  result = await request(new CookieJar(), "POST", "/api/v1/devices/bindings", {
-    project_id: projectId,
-    workspace_identity: "ws-smoke-001",
-    display_name: "Smoke workspace",
-    environment_type: "local",
-  }, deviceHeaders);
+  result = await request(
+    new CookieJar(),
+    "POST",
+    "/api/v1/devices/bindings",
+    {
+      project_id: projectId,
+      workspace_identity: "ws-smoke-001",
+      display_name: "Smoke workspace",
+      environment_type: "local",
+    },
+    deviceHeaders,
+  );
   assert.equal(result.status, 201);
   const bindingId = result.payload.id;
   check("7. workspace bound to project", Boolean(bindingId));
 
   // Duplicate binding identity rejected.
-  result = await request(new CookieJar(), "POST", "/api/v1/devices/bindings", {
-    project_id: projectId,
-    workspace_identity: "ws-smoke-001",
-    display_name: "Duplicate",
-    environment_type: "local",
-  }, deviceHeaders);
+  result = await request(
+    new CookieJar(),
+    "POST",
+    "/api/v1/devices/bindings",
+    {
+      project_id: projectId,
+      workspace_identity: "ws-smoke-001",
+      display_name: "Duplicate",
+      environment_type: "local",
+    },
+    deviceHeaders,
+  );
   assert.equal(result.status, 409);
   assert.equal(result.payload.error.details.reason, "workspace_binding_conflict");
   check("7b. duplicate binding identity rejected", true);
@@ -250,14 +280,26 @@ const run = async () => {
   check("8. control plane lists device and binding", true);
 
   // 9. Policy fetch + ack.
-  result = await request(new CookieJar(), "GET", "/api/v1/devices/policy", deviceHeaders);
+  result = await request(
+    new CookieJar(),
+    "GET",
+    "/api/v1/devices/policy",
+    undefined,
+    deviceHeaders,
+  );
   assert.equal(result.status, 200);
   const policyVersion = result.payload.policy_version;
   assert.equal(result.payload.org_id, orgId);
   assert.ok(result.payload.payload.projects.bindings.includes(projectId));
-  result = await request(new CookieJar(), "POST", "/api/v1/devices/policy/ack", {
-    policy_version: policyVersion,
-  }, deviceHeaders);
+  result = await request(
+    new CookieJar(),
+    "POST",
+    "/api/v1/devices/policy/ack",
+    {
+      policy_version: policyVersion,
+    },
+    deviceHeaders,
+  );
   assert.equal(result.status, 204);
   check("9. device fetched and acked policy", `v${policyVersion}`);
 
@@ -272,7 +314,13 @@ const run = async () => {
   );
   assert.equal(result.status, 201);
   const orgB = result.payload.organization.org_id;
-  result = await request(new CookieJar(), "GET", "/api/v1/devices/policy", deviceHeaders);
+  result = await request(
+    new CookieJar(),
+    "GET",
+    "/api/v1/devices/policy",
+    undefined,
+    deviceHeaders,
+  );
   assert.equal(result.payload.org_id, orgId);
   assert.notEqual(result.payload.org_id, orgB);
   check("9b. policy audience bound to enrolling org", true);
@@ -286,23 +334,29 @@ const run = async () => {
     { ...csrf, "Idempotency-Key": `revoke-${deviceId}` },
   );
   assert.equal(result.status, 204);
-  result = await request(new CookieJar(), "POST", "/api/v1/devices/heartbeat", {
-    app_version: device.appVersion,
-  }, deviceHeaders);
+  result = await request(
+    new CookieJar(),
+    "POST",
+    "/api/v1/devices/heartbeat",
+    {
+      app_version: device.appVersion,
+    },
+    deviceHeaders,
+  );
   assert.equal(result.status, 401);
-  result = await request(new CookieJar(), "GET", "/api/v1/devices/policy", deviceHeaders);
+  result = await request(
+    new CookieJar(),
+    "GET",
+    "/api/v1/devices/policy",
+    undefined,
+    deviceHeaders,
+  );
   assert.equal(result.status, 401);
   check("10. revoked device loses managed access", true);
 
   // 10b. Stale membership: Bob enrolls into the org, Alice approves, then
   // removes Bob; his device can no longer refresh.
   const bob = await authenticatedUser("P03 Bob");
-  result = await request(
-    bob.jar,
-    "POST",
-    `/api/v1/invitations/accept-by-slug/${slug}`,
-    undefined,
-  );
   // Invitations require an invitation record; use the admin invite flow.
   result = await request(
     alice.jar,
@@ -311,12 +365,18 @@ const run = async () => {
     { email: bob.user.email, role: "member" },
     { ...csrf, "Idempotency-Key": `invite-${randomUUID()}` },
   );
+  if (result.status !== 201) console.error("invite payload:", JSON.stringify(result.payload));
   assert.equal(result.status, 201);
   const invitationToken = result.payload.development_token;
-  const invitationId = result.payload.id;
-  result = await request(bob.jar, "POST", `/api/v1/invitations/${invitationId}/accept`, {
-    token: invitationToken,
-  });
+  const invitationId = result.payload.invitation.id;
+  result = await request(
+    bob.jar,
+    "POST",
+    `/api/v1/invitations/${invitationId}/accept`,
+    { token: invitationToken },
+    csrfHeaders(bob.jar),
+  );
+  if (result.status !== 200) console.error("accept payload:", JSON.stringify(result.payload));
   assert.equal(result.status, 200);
 
   const bobDevice = makeDevice("Bob Laptop", "darwin-arm64", "0.3.1");
@@ -329,27 +389,31 @@ const run = async () => {
     app_version: bobDevice.appVersion,
   });
   const bobEnrollmentId = result.payload.enrollment_id;
+  // Bob approves his own enrollment: the approver becomes the device owner,
+  // so stale-membership revocation semantics apply to him.
   result = await request(
-    alice.jar,
+    bob.jar,
     "POST",
     `/api/v1/orgs/${orgId}/devices/enrollments/${bobEnrollmentId}/approve`,
     {},
-    { ...csrf, "Idempotency-Key": `approve-${bobEnrollmentId}` },
+    { ...csrfHeaders(bob.jar), "Idempotency-Key": `approve-${bobEnrollmentId}` },
   );
   assert.equal(result.status, 201);
   const bobDeviceId = result.payload.device.id;
 
   // Alice removes Bob.
   result = await request(alice.jar, "GET", `/api/v1/orgs/${orgId}/members`);
+  const bobMember = result.payload.items.find((item) => item.user_id === bob.user.id);
+  assert.ok(bobMember, "Bob membership should exist before removal");
   const bobMembership = result.payload.items.find((item) => item.user_id === bob.user.id);
   result = await request(
     alice.jar,
     "DELETE",
     `/api/v1/orgs/${orgId}/members/${bobMembership.membership_id}`,
     undefined,
-    csrf,
+    { ...csrf, "If-Match": `"${bobMembership.version}"` },
   );
-  assert.equal(result.status, 204);
+  assert.equal(result.status, 204, `member removal failed: ${result.status}`);
 
   // Bob's device token refresh now fails membership_required.
   const bobNonce = await request(new CookieJar(), "GET", "/api/v1/devices/token/nonce");

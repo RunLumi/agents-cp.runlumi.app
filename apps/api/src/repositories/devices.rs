@@ -48,8 +48,8 @@ INSERT INTO devices (
 
 const APPROVE_ENROLLMENT_SQL: &str = r#"
 UPDATE device_enrollments
-SET approved_by_user_id = ?3, updated_at = ?4
-WHERE enrollment_id = ?1 AND org_id = ?2 AND status = 'pending' AND expires_at > ?4
+SET approved_by_user_id = ?3, device_id = ?4, updated_at = ?5
+WHERE enrollment_id = ?1 AND org_id = ?2 AND status = 'pending' AND expires_at > ?5
 "#;
 
 const COMPLETE_ENROLLMENT_SQL: &str = r#"
@@ -274,6 +274,7 @@ impl<'a> DeviceRepository<'a> {
                 BindValue::Text(&enrollment.enrollment_id),
                 BindValue::Text(&enrollment.org_id),
                 BindValue::Text(approved_by_user_id),
+                BindValue::Text(device_id),
                 BindValue::Text(now.as_str()),
             ],
         )?;
@@ -291,7 +292,9 @@ impl<'a> DeviceRepository<'a> {
                 BindValue::Text(now.as_str()),
             ],
         )?;
-        Ok(vec![approve, insert_device])
+        // Insert the device first: SQLite foreign keys are immediate, so the
+        // enrollment's device_id reference needs its row to exist up front.
+        Ok(vec![insert_device, approve])
     }
 
     /// Complete an approved enrollment after proof verification: close the
