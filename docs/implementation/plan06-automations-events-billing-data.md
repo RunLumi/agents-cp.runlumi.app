@@ -1,6 +1,6 @@
 # Plan 06 — Automations, event delivery, billing, entitlements, data governance
 
-Status: Planned
+Status: In progress — Contract Gate `p06-cg-v1` draft under coordinator review; implementation packets are defined and blocked until freeze.
 Specs: F15, F17, F18, F20
 Depends on: P05
 

@@ -1,0 +1,109 @@
+{
+  "contract_version": "p06-cg-v1",
+  "automation": {
+    "automation_id": "aut_0123456789abcdef0123456789abcdef",
+    "org_id": "org_0123456789abcdef0123456789abcdef",
+    "project_id": "prj_0123456789abcdef0123456789abcdef",
+    "name": "Weekday review",
+    "target": {
+      "kind": "eligible_device",
+      "workspace_binding_id": "wsb_0123456789abcdef0123456789abcdef",
+      "required_capabilities": ["text"]
+    },
+    "schedule": {
+      "kind": "cron",
+      "expression": "0 9 * * 1-5",
+      "timezone": "America/Los_Angeles",
+      "overlap_policy": "skip",
+      "missed_policy": "run_once",
+      "catch_up_limit": 1
+    },
+    "status": "active",
+    "version": 3
+  },
+  "occurrence": {
+    "occurrence_id": "occ_0123456789abcdef0123456789abcdef",
+    "automation_id": "aut_0123456789abcdef0123456789abcdef",
+    "scheduled_for": "2026-09-25T16:00:00.000Z",
+    "schedule_rule_version": 3,
+    "state": "pending",
+    "attempt": 0,
+    "kind": "scheduled"
+  },
+  "lease": {
+    "lease_id": "lse_0123456789abcdef0123456789abcdef",
+    "occurrence_id": "occ_0123456789abcdef0123456789abcdef",
+    "device_id": "dvc_0123456789abcdef0123456789abcdef",
+    "state": "active",
+    "attempt": 1,
+    "expires_at": "2026-09-25T16:05:00.000Z"
+  },
+  "webhook": {
+    "endpoint_id": "whe_0123456789abcdef0123456789abcdef",
+    "event_id": "evt_0123456789abcdef0123456789abcdef",
+    "event_type": "automation.completed.v1",
+    "signature_version": "v1",
+    "timestamp": 1780000000,
+    "signature": "v1=placeholder-not-a-real-signature",
+    "body": {
+      "event_id": "evt_0123456789abcdef0123456789abcdef",
+      "event_type": "automation.completed.v1",
+      "organization_id": "org_0123456789abcdef0123456789abcdef",
+      "occurrence_id": "occ_0123456789abcdef0123456789abcdef",
+      "resource_version": 4
+    }
+  },
+  "entitlements": {
+    "subscription_id": "sub_0123456789abcdef0123456789abcdef",
+    "org_id": "org_0123456789abcdef0123456789abcdef",
+    "plan_key": "team",
+    "status": "grace",
+    "grace_expires_at": "2026-10-02T12:00:00.000Z",
+    "values": {
+      "automations.max_active": 100,
+      "webhooks.enabled": true,
+      "exports.enabled": true
+    }
+  },
+  "data_policy": {
+    "policy_id": "dgp_0123456789abcdef0123456789abcdef",
+    "org_id": "org_0123456789abcdef0123456789abcdef",
+    "project_id": null,
+    "logging_mode": "metadata_only",
+    "default_retention_days": 90,
+    "default_export_expiry_seconds": 86400
+  },
+  "jobs": {
+    "export": {
+      "export_id": "exp_0123456789abcdef0123456789abcdef",
+      "state": "running",
+      "attempt": 1,
+      "artifact_expires_at": "2026-09-26T12:00:00.000Z"
+    },
+    "deletion": {
+      "deletion_id": "del_0123456789abcdef0123456789abcdef",
+      "state": "failed",
+      "attempt": 1,
+      "failed_step": "artifact_objects",
+      "resume_allowed": true
+    }
+  },
+  "negative_fixtures": {
+    "invalid_schedule": {
+      "kind": "cron",
+      "expression": "not a cron",
+      "timezone": "America/Los_Angeles"
+    },
+    "over_limit_downgrade": {
+      "plan_key": "starter",
+      "automations.max_active": 3,
+      "current_active_automations": 7,
+      "expected": "block_new_and_expansion_without_delete"
+    },
+    "transient_billing_outage": {
+      "subscription_status": "grace",
+      "local_execution": "allowed_until_grace_expiry",
+      "platform_paid_inference": "may_deny_with_stable_reason"
+    }
+  }
+}
