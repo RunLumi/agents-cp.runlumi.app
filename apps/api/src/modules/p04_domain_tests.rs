@@ -66,13 +66,13 @@ fn credential_resolution_rejects_revoked_cross_user_and_local_only_handles() {
         &metadata,
         &org_id,
         &user_id,
-        CredentialMode::PlatformOrOrganization
+        CredentialMode::OrderedFallback
     ));
     assert!(!can_resolve_credential(
         &metadata,
         &org_id,
         &other_user_id,
-        CredentialMode::PlatformOrOrganization
+        CredentialMode::OrderedFallback
     ));
     let mut revoked = metadata.clone();
     revoked.status = CredentialStatus::Revoked;
@@ -80,7 +80,7 @@ fn credential_resolution_rejects_revoked_cross_user_and_local_only_handles() {
         &revoked,
         &org_id,
         &user_id,
-        CredentialMode::PlatformOrOrganization
+        CredentialMode::OrderedFallback
     ));
     let mut local = metadata;
     local.owner_type = CredentialOwnerType::LocalOnly;
@@ -88,7 +88,7 @@ fn credential_resolution_rejects_revoked_cross_user_and_local_only_handles() {
         &local,
         &org_id,
         &user_id,
-        CredentialMode::PlatformOrOrganization
+        CredentialMode::OrderedFallback
     ));
 }
 
@@ -119,7 +119,11 @@ fn route_config() -> RouteConfig {
 fn model(id_value: &str, capabilities: &[ModelCapability]) -> super::catalog::ModelDescriptor {
     super::catalog::ModelDescriptor {
         model_id: id_value.to_owned(),
-        provider_id: id("prv", 1),
+        provider_id: if id_value == id("mdl", 2) {
+            id("prv", 2)
+        } else {
+            id("prv", 1)
+        },
         provider_model_id: "upstream-model".to_owned(),
         display_name: "Model".to_owned(),
         capabilities: ModelCapabilities::from_iter(capabilities.iter().copied()),
@@ -234,6 +238,15 @@ fn request() -> InferenceRequest {
         session_id: None,
         run_id: None,
     }
+}
+
+#[test]
+fn native_request_keeps_alias_and_scope_separate_from_provider_credentials() {
+    let request = request();
+    assert_eq!(request.model, "coding-default");
+    assert!(request.stream);
+    assert!(request.tools.is_empty());
+    assert!(request.project_id.is_none());
 }
 
 #[test]
