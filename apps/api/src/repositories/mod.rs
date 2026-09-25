@@ -15,7 +15,10 @@ mod projects;
 mod security;
 
 pub use device::{DeviceAuthorizationRecord, DeviceAuthorizationRepository};
-pub use devices::{DeviceEnrollmentRecord, DeviceRecord, DeviceRepository, DeviceTokenRecord};
+pub use devices::{
+    DeviceEnrollmentInput, DeviceEnrollmentRecord, DeviceRecord, DeviceRepository,
+    DeviceTokenRecord,
+};
 pub use idempotency::{IdempotencyClaimToken, IdempotencyLookup, IdempotencyRepository};
 pub use identity::{
     ChallengeRecord, IdentityRecord, IdentityRepository, SessionRecord, SessionSummary, UserRecord,
@@ -26,5 +29,8 @@ pub use organizations::{
 };
 pub use outbox::OutboxRepository;
 pub use policy::{PolicyAckRecord, PolicyRepository, PolicySnapshotRecord};
-pub use projects::{ProjectGrantRecord, ProjectRecord, ProjectRepository, WorkspaceBindingRecord};
+pub use projects::{
+    NewProjectInput, ProjectGrantRecord, ProjectRecord, ProjectRepository, ProjectUpdateInput,
+    WorkspaceBindingRecord,
+};
 pub use security::{SecurityEventInput, SecurityEventRecord, SecurityEventRepository};

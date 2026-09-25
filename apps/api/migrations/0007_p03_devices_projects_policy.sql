@@ -127,3 +127,11 @@ CREATE TABLE policy_acks (
 );
 
 CREATE UNIQUE INDEX ux_policy_acks_device_version ON policy_acks (device_id, policy_version);
+
+-- P03-CR-001: authoritative per-org minimum client version used by the
+-- device token exchange (F19-008). NULL disables the check.
+CREATE TABLE org_device_policy_settings (
+    org_id TEXT PRIMARY KEY REFERENCES organizations (org_id),
+    min_client_version TEXT,
+    updated_at TEXT NOT NULL
+);

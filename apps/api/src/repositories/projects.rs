@@ -267,6 +267,41 @@ impl<'a> ProjectRepository<'a> {
             .unwrap_or_default() as u32)
     }
 
+    /// Org-wide page for managers (restricted projects included).
+    pub async fn list_projects_unrestricted(
+        &self,
+        org_id: &str,
+        cursor: Option<(&str, &str)>,
+        limit: i32,
+    ) -> worker::Result<Vec<ProjectRecord>> {
+        let statement = match cursor {
+            Some((created_at, project_id)) => self.database.prepare(
+                r#"SELECT project_id, org_id, name, slug, visibility, archived_at, default_model_route,
+       version, created_by_user_id, created_at, updated_at
+FROM projects
+WHERE org_id = ?1 AND (created_at, project_id) < (?2, ?3)
+ORDER BY created_at DESC, project_id DESC
+LIMIT ?4"#,
+                &[
+                    BindValue::Text(org_id),
+                    BindValue::Text(created_at),
+                    BindValue::Text(project_id),
+                    BindValue::Integer(limit),
+                ],
+            )?,
+            None => self.database.prepare(
+                r#"SELECT project_id, org_id, name, slug, visibility, archived_at, default_model_route,
+       version, created_by_user_id, created_at, updated_at
+FROM projects
+WHERE org_id = ?1
+ORDER BY created_at DESC, project_id DESC
+LIMIT ?2"#,
+                &[BindValue::Text(org_id), BindValue::Integer(limit)],
+            )?,
+        };
+        statement.all().await?.results::<ProjectRecord>()
+    }
+
     pub async fn list_projects_for_member(
         &self,
         org_id: &str,
