@@ -71,3 +71,11 @@ GitHub Actions runs the same check set from `.github/workflows/checks.yml`, then
 Read `AGENTS.md` and `docs/adr/` before substantial work.
 
 The workspace lockfile is now present and CI requires it (`pnpm install --frozen-lockfile`). The current pinned pnpm also explicitly allows build scripts only for the exact esbuild/workerd versions needed for the web and Worker toolchains.
+
+## License
+
+**Proprietary. All rights reserved. This repository is not open source.**
+
+Copyright © 2026 CLOUDJET SOLUTIONS PTE. LTD.
+
+Access to, possession of, or accidental/public disclosure of this source code does **not** grant permission to use, execute, deploy, copy, modify, distribute, host, sublicense, or commercialize it. See [LICENSE](./LICENSE) for the complete terms. Third-party dependencies remain subject to their own licenses.

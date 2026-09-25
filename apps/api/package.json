@@ -1,6 +1,7 @@
 {
   "name": "@runlumi/agents-cp-api",
   "version": "0.0.0",
+  "license": "UNLICENSED",
   "private": true,
   "scripts": {
     "dev": "wrangler dev --env development",

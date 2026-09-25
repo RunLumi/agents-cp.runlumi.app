@@ -1,0 +1,75 @@
+LUMI PROPRIETARY SOFTWARE LICENSE
+
+Copyright © 2026 CLOUDJET SOLUTIONS PTE. LTD.
+All rights reserved.
+
+1. PROPRIETARY STATUS
+
+Except for third-party materials governed by their own licenses, the software,
+source code, object code, documentation, designs, schemas, prompts,
+configuration, and associated materials in this repository (collectively, the
+"Software") are proprietary to CLOUDJET SOLUTIONS PTE. LTD. and/or its
+licensors.
+
+This Software is NOT open source.
+
+2. NO LICENSE BY ACCESS OR DISCLOSURE
+
+No license or permission is granted merely because the Software is accessed,
+viewed, disclosed, leaked, accidentally published, downloaded, cloned,
+received, or otherwise comes into a person's possession.
+
+Any rights necessarily provided by a source-hosting platform apply only to the
+extent required by that platform's terms and do not grant permission from
+CLOUDJET SOLUTIONS PTE. LTD. to use or commercialize the Software.
+
+3. PROHIBITED ACTS
+
+Unless CLOUDJET SOLUTIONS PTE. LTD. gives prior written authorization under a
+separate agreement, you may not, directly or indirectly:
+
+- use, execute, deploy, operate, or host the Software;
+- copy, reproduce, modify, adapt, translate, or create derivative works from
+  the Software;
+- distribute, publish, disclose, sublicense, sell, rent, lease, transfer, or
+  otherwise make the Software available to any third party;
+- commercialize the Software or use it to provide a product, service,
+  software-as-a-service offering, managed service, hosted service, or other
+  commercial offering;
+- incorporate any protected portion of the Software into another product,
+  service, codebase, model, dataset, or system;
+- remove, obscure, or alter copyright, ownership, confidentiality, or other
+  proprietary notices; or
+- reverse engineer, decompile, or disassemble any object-code portion of the
+  Software, except only to the limited extent that such restriction is
+  prohibited by applicable mandatory law.
+
+4. AUTHORIZED USE
+
+Any authorized use must be expressly granted in writing by CLOUDJET SOLUTIONS
+PTE. LTD. The terms of that written agreement control to the extent they
+conflict with this notice.
+
+5. THIRD-PARTY MATERIALS
+
+Third-party libraries, dependencies, components, and other materials remain
+subject to their respective licenses and notices. Nothing in this license
+limits rights that a third-party license independently grants to those
+third-party materials.
+
+6. RESERVATION OF RIGHTS; NO WAIVER
+
+All rights not expressly granted in a written agreement are reserved.
+Accidental disclosure, public availability, failure to enforce a right, or
+delay in enforcement does not grant a license and does not waive any right or
+remedy.
+
+7. DISCLAIMER
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE SOFTWARE IS PROVIDED "AS IS"
+WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND
+NON-INFRINGEMENT.
+
+For commercial licensing or other authorized use, obtain prior written
+permission from CLOUDJET SOLUTIONS PTE. LTD.
