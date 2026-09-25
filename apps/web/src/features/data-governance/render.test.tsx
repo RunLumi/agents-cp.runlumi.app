@@ -18,7 +18,7 @@ import {
   type DeletionJob,
   type ExportJob,
 } from "./api";
-import { DataPanel } from "./data-panel";
+import { DataPanel, POLICY_UNAVAILABLE_REASON } from "./data-panel";
 import { DataPolicyEditor } from "./data-policy";
 import {
   DeletionDetail,
@@ -649,6 +649,73 @@ const pendingApi = {
   listExports: () => new Promise(() => undefined),
   listDeletions: () => new Promise(() => undefined),
 } as unknown as DataGovernanceApi;
+
+const EMPTY_DELETION_PAGE = { items: [], next_cursor: null, has_more: false };
+
+describe("panel composition", () => {
+  /**
+   * A `pending_deletion` organization is fenced for the policy read but still
+   * answers deletion job status and resume under the frozen lifecycle
+   * exception. If the job surfaces were gated on the policy being readable, a
+   * tenant mid-deletion would lose sight of the work it still has to finish —
+   * and the worst time to lose sight of that is right after requesting the
+   * deletion.
+   *
+   * WHY this is not a panel render test: this repo's web test stack is
+   * `renderToStaticMarkup` with no DOM and no `act()`, so a container with an
+   * async policy read is always captured in its initial loading state. The
+   * panel's conditional wiring is therefore verified by reading the component —
+   * `exportPage` and `deletionPage` are rendered outside the
+   * `currentPolicy !== null` guard — and not by a DOM assertion. Closing that
+   * properly needs a render-cycle test harness, which would mean adding a DOM
+   * test dependency; that is a deliberate decision, not something to slip in at
+   * the end of a phase. The behaviour itself IS pinned below, one level down,
+   * where a synchronous render is meaningful.
+   */
+  it("names why a policy can be unreadable while the job surfaces are not", () => {
+    expect(POLICY_UNAVAILABLE_REASON).toMatch(/fenced for new work/i);
+    expect(POLICY_UNAVAILABLE_REASON).toMatch(/status and resume stay available/i);
+    expect(POLICY_UNAVAILABLE_REASON).toMatch(/a pending deletion is not a missing record/i);
+    // It must not read as though the deletion record were missing, which would
+    // be the most damaging possible misreading during a deletion.
+    expect(POLICY_UNAVAILABLE_REASON).not.toMatch(/not found|no such|does not exist/i);
+  });
+
+  /**
+   * The deletion workflow must carry its own honesty copy wherever it renders,
+   * independently of the panel that hosts it. This is the substantive part of
+   * the property above, and it IS reachable synchronously.
+   */
+  it("renders the deletion workflow's own scope disclosure", () => {
+    const markup = renderToStaticMarkup(
+      <OrgDeletionWorkflow
+        orgId={ORG_ID}
+        api={
+          {
+            listDeletions: () => Promise.resolve(EMPTY_DELETION_PAGE),
+          } as unknown as DataGovernanceApi
+        }
+        page={EMPTY_DELETION_PAGE}
+        detail={null}
+        detailStatus="idle"
+        detailError={null}
+        status="ready"
+        error={null}
+        refreshing={false}
+        canDelete
+        onRefresh={() => undefined}
+        onLoadMore={() => undefined}
+        onSelect={() => undefined}
+        onResumed={() => undefined}
+      />,
+    );
+    expect(markup).toContain("DELETION WORKFLOWS");
+    expect(markup).toContain("Organization deletion");
+    // The disclosure a reviewer must be able to see before trusting a
+    // "completed" deletion.
+    expect(markup).toContain("What this workflow does not delete");
+  });
+});
 
 describe("deletion step surface", () => {
   it("separates what Lumi deleted from what it cannot delete", () => {

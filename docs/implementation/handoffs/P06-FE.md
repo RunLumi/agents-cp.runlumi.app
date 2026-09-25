@@ -6,12 +6,12 @@ plus the four shell registrations that make them reachable.
 
 ## What shipped
 
-| Section | Feature directory | Tests |
-|---|---|---|
-| Automations | `apps/web/src/features/automations/` | 76 |
-| Webhooks & alerts | `apps/web/src/features/webhooks/`, `.../notifications/` | 116 |
-| Plan & usage | `apps/web/src/features/billing/` | 70 |
-| Data & retention | `apps/web/src/features/data-governance/` | 109 |
+| Section           | Feature directory                                       | Tests |
+| ----------------- | ------------------------------------------------------- | ----- |
+| Automations       | `apps/web/src/features/automations/`                    | 76    |
+| Webhooks & alerts | `apps/web/src/features/webhooks/`, `.../notifications/` | 116   |
+| Plan & usage      | `apps/web/src/features/billing/`                        | 70    |
+| Data & retention  | `apps/web/src/features/data-governance/`                | 109   |
 
 All four are lazy panels registered in
 `apps/web/src/features/organizations/org-dashboard.tsx`, so the initial route
@@ -28,7 +28,7 @@ are therefore enforced client-side as well as server-side:
   names with the reason shown, and passes already-stored names through
   unchanged so editing an endpoint never silently drops a live subscription.
 - **Mandatory security notifications cannot be opted out.** The client mirrors
-  the server's family *containment* check rather than exact equality. A
+  the server's family _containment_ check rather than exact equality. A
   stricter client would show a mandatory event as optional and then let the
   write fail.
 - **Retention may be shortened, never extended** past the legal maximum
@@ -58,7 +58,7 @@ real rendered component tree rather than described in a comment.
 - **The four decision inputs are separate.** Authorization permission, Lumi
   product entitlement, usage budget, and upstream provider entitlement get
   distinct surfaces, and the panel opens by naming them and what each one
-  does *not* decide.
+  does _not_ decide.
 
 ## Two rules that make the honesty properties structural
 
@@ -105,6 +105,42 @@ Recorded rather than papered over:
   `tabular-nums` `<time>`. The "provenance eyebrow" pattern
   (`LUMI SUBSCRIPTION` / `LICENSE STATE` / `UPSTREAM PROVIDER ACCOUNT`) emerged
   and is used consistently. All three are candidates for `DESIGN.md`.
+
+## Test-harness limitation found while verifying, not assumed
+
+While completing a partially-written test I tried to assert that the data
+panel renders its export and deletion job surfaces even when the policy
+read is refused — the `pending_deletion` case, where a tenant must still see
+the deletion it has to finish.
+
+**It cannot be asserted with this repo's web test stack.** `apps/web` has
+vitest with `renderToStaticMarkup` and no DOM, no `act()`, and no
+`@testing-library`. A container with an async read is therefore always
+captured in its initial loading state, so the conditional wiring is not
+reachable from a static render.
+
+I first wrote a version of that test anyway. It passed — and then it also
+passed with the job surfaces deliberately nested inside the policy guard,
+because the assertions were matching the panel's own static headings rather
+than the workflows. It was a vacuous test.
+
+What is actually pinned now:
+
+- The copy shown when the policy is unreadable, asserted on the exported
+  `POLICY_UNAVAILABLE_REASON`, including that it never reads as though the
+  deletion record were missing.
+- The deletion workflow's own scope disclosure, rendered directly. Removing
+  `<DisclosureList items={disclosures} …>` from `deletion-workflows.tsx` fails
+  both this test and the pre-existing disclosure test, so the property has
+  teeth.
+- The panel's conditional wiring is verified by reading the component:
+  `exportPage` and `deletionPage` are rendered outside the
+  `currentPolicy !== null` guard.
+
+**Closing this properly needs a render-cycle test harness, which means adding
+a DOM test dependency.** That is a deliberate decision for a follow-up, not
+something to slip in at the end of a phase. It is named here rather than
+papered over with a test that cannot fail.
 
 ## Known limitation: browser evidence is owed
 
