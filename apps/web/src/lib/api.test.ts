@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createFoundationCheck, getHealth } from "@/lib/api";
+import { createFoundationCheck, getHealth, signup } from "@/lib/api";
 import { ApiClientError, presentApiError } from "@/lib/errors";
 
 const requestId = "req_0123456789abcdef0123456789abcdef";
@@ -175,6 +175,38 @@ describe("API client", () => {
       status: 200,
       retryable: false,
     });
+  });
+
+  it("sends cookies and CSRF headers for authenticated mutations", async () => {
+    vi.stubGlobal("document", { cookie: "lumi_csrf=csrf-token" });
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(
+        {
+          user: {
+            id: "usr_0123456789abcdef0123456789abcdef",
+            email: "person@example.com",
+            display_name: "Person",
+            email_verified: false,
+            created_at: "2026-09-24T00:00:00.000Z",
+          },
+          verification: {
+            challenge_id: "idn_0123456789abcdef0123456789abcdef",
+            expires_at: "2026-09-24T00:10:00.000Z",
+          },
+        },
+        201,
+      ),
+    );
+
+    await signup({ email: "person@example.com", display_name: "Person" });
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const headers = new Headers(init?.headers);
+
+    expect(init?.credentials).toBe("include");
+    expect(init?.body).toBe(
+      JSON.stringify({ email: "person@example.com", display_name: "Person" }),
+    );
+    expect(headers.get("X-CSRF-Token")).toBe("csrf-token");
   });
 
   it("sends the frozen empty foundation-check body and idempotency key", async () => {

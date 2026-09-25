@@ -132,11 +132,20 @@ macro_rules! resource_id_type {
 
 resource_id_type!(RequestId, InvalidRequestId, Some("req"));
 resource_id_type!(EventId, InvalidEventId, Some("evt"));
-// P01-CG does not freeze prefixes for these resource kinds; retain the opaque
-// resource format without inventing one here.
-resource_id_type!(OrganizationId, InvalidResourceId, None::<&str>);
-resource_id_type!(DeviceId, InvalidResourceId, None::<&str>);
-resource_id_type!(SessionId, InvalidResourceId, None::<&str>);
+// P01-CG intentionally left the P02 resource prefixes open. P02-CG freezes the
+// following names; keeping them typed prevents accidental ID/prefix swaps.
+resource_id_type!(UserId, InvalidResourceId, Some("usr"));
+resource_id_type!(IdentityId, InvalidResourceId, Some("idn"));
+resource_id_type!(OrganizationId, InvalidResourceId, Some("org"));
+resource_id_type!(MembershipId, InvalidResourceId, Some("mem"));
+resource_id_type!(InvitationId, InvalidResourceId, Some("inv"));
+resource_id_type!(TeamId, InvalidResourceId, Some("team"));
+resource_id_type!(TeamMemberId, InvalidResourceId, Some("tmem"));
+resource_id_type!(ReauthenticationGrantId, InvalidResourceId, Some("rag"));
+resource_id_type!(DeviceAuthorizationId, InvalidResourceId, Some("dev"));
+resource_id_type!(SecurityEventId, InvalidResourceId, Some("sec"));
+resource_id_type!(DeviceId, InvalidResourceId, Some("dev"));
+resource_id_type!(SessionId, InvalidResourceId, Some("ses"));
 
 /// Opaque actor/principal identifier supplied only by trusted identity context.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]

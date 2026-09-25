@@ -2,4 +2,4 @@
 
 mod outbox;
 
-pub use outbox::{FoundationEventHandler, consume_outbox_batch};
+pub use outbox::{ProductEventHandler, consume_outbox_batch};
