@@ -736,16 +736,19 @@ pub async fn sign_license(
     })
 }
 
-/// The stable failure block embedded when a license cannot be issued.
+/// The value of the `license` field when a license cannot be issued.
 ///
 /// `/devices/policy` must never fail because a billing/signing dependency is
 /// unhealthy: a device that cannot refresh its policy would be bricked, and
 /// P06-CR-002 requires a transient outage not to disable unrelated local work.
-/// The domain capability matrix then denies new work with a stable reason.
+/// The block therefore reports `available: false` with a STABLE frozen reason,
+/// and the domain capability matrix then denies new work with that reason rather
+/// than the device guessing. The shape matches a successful block closely enough
+/// that a client can branch on `available` alone.
 pub fn license_unavailable_block(reason: LicenseSignatureError) -> Value {
     json!({
-        "license": Value::Null,
-        "license_error": reason.code(),
+        "available": false,
+        "reason": reason.code(),
         "signature_algorithm": LICENSE_SIGNATURE_ALGORITHM,
     })
 }
@@ -1269,8 +1272,13 @@ mod tests {
     #[test]
     fn unavailable_block_is_stable_and_carries_no_secret() {
         let block = license_unavailable_block(LicenseSignatureError::SigningKeyNotConfigured);
-        assert_eq!(block["license_error"], "license_key_unknown");
-        assert!(block["license"].is_null());
+        assert_eq!(block["available"], false);
+        assert_eq!(block["reason"], "license_key_unknown");
         assert_eq!(block["signature_algorithm"], "ed25519");
+        // The block is the VALUE of the `license` field, so a client branches on
+        // `available` and never has to distinguish "missing" from "unsigned".
+        assert!(block.get("license").is_none());
+        assert!(block.get("entitlements").is_none());
+        assert!(!serde_json::to_string(&block).unwrap().contains("PRIVATE"));
     }
 }

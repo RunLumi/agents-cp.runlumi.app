@@ -38,6 +38,21 @@ fn utc() -> ZoneOffsets {
     ZoneOffsets::utc()
 }
 
+/// Every frozen occurrence state, listed so the transition-table test can walk
+/// the whole cross product rather than the states it happens to remember.
+const ALL_OCCURRENCE_STATES: [OccurrenceState; 10] = [
+    OccurrenceState::Pending,
+    OccurrenceState::Dispatching,
+    OccurrenceState::Leased,
+    OccurrenceState::Started,
+    OccurrenceState::Succeeded,
+    OccurrenceState::Failed,
+    OccurrenceState::Cancelled,
+    OccurrenceState::Missed,
+    OccurrenceState::Skipped,
+    OccurrenceState::Ambiguous,
+];
+
 // ---------------------------------------------------------------------------
 // Occurrence identity
 // ---------------------------------------------------------------------------
@@ -821,8 +836,135 @@ fn every_domain_error_maps_to_a_frozen_stable_code() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Regression tests for defects the invariants above depend on
+//
+// Each of these pins a specific behavior that a plausible rewrite breaks
+// silently rather than loudly, so the "why" is recorded next to the assertion
+// rather than in a comment nobody re-reads.
+// ---------------------------------------------------------------------------
+
+/// Standard-cron `or` mode must not let a day field that covers every day
+/// disable the other one.
+///
+/// The day-of-week field accepts `7` as an alias for Sunday `0`. If that alias
+/// is not folded before the field's range is computed, a `*` day-of-week field
+/// can never be recognized as unrestricted, the `or` rule degrades to
+/// `dom || dow`, and `dow` is then unconditionally true — so a monthly
+/// automation such as `0 9 15 * *` fires *every day*. That failure mode is
+/// silent, and it was live in this module.
 #[test]
-fn probe_missed_run_never_returns_a_future_slot() {
+fn or_mode_treats_a_full_day_field_as_unrestricted() {
+    let from = parse_instant_utc("2026-09-01T00:00:00.000Z").unwrap();
+    let rendered = |expression: &str, mode: DomDowMode, limit: usize| -> Vec<String> {
+        let rule = ScheduleRule::cron(
+            expression,
+            "UTC",
+            mode,
+            DstPolicy::SkipDuplicate,
+            OverlapPolicy::Skip,
+            MissedPolicy::RunOnce,
+            None,
+        )
+        .unwrap();
+        next_due_instants(&rule, &utc(), from, limit)
+            .unwrap()
+            .iter()
+            .map(|slot| slot.scheduled_for().unwrap())
+            .collect()
+    };
+
+    // Day-of-month only, across every day-of-week spelling that means "every
+    // day". All four must agree, and none may leak into other days.
+    for expression in ["0 9 15 * *", "0 9 15 * 0-6", "0 9 15 * 0-7", "0 9 15 * *"] {
+        assert_eq!(
+            rendered(expression, DomDowMode::Or, 3),
+            vec![
+                "2026-09-15T09:00:00.000Z",
+                "2026-10-15T09:00:00.000Z",
+                "2026-11-15T09:00:00.000Z",
+            ],
+            "{expression} must match only the 15th of each month"
+        );
+    }
+
+    // Day-of-week only, with an unrestricted day-of-month. 2026-09-01 is a
+    // Tuesday, so the first weekday hits are the 1st, 2nd, and 3rd.
+    assert_eq!(
+        rendered("0 9 * * 1-5", DomDowMode::Or, 3),
+        vec![
+            "2026-09-01T09:00:00.000Z",
+            "2026-09-02T09:00:00.000Z",
+            "2026-09-03T09:00:00.000Z",
+        ]
+    );
+
+    // Both fields restricted: standard cron OR-s them. `3` is Wednesday, and
+    // 2026-09-02/09/16 are Wednesdays while the 1st is the day-of-month match.
+    assert_eq!(
+        rendered("0 9 1 * 3", DomDowMode::Or, 3),
+        vec![
+            "2026-09-01T09:00:00.000Z", // the 1st
+            "2026-09-02T09:00:00.000Z", // a Wednesday
+            "2026-09-09T09:00:00.000Z",
+        ]
+    );
+
+    // A month-restricted rule must not leak into other months.
+    assert_eq!(
+        rendered("0 9 1 1 *", DomDowMode::Or, 3),
+        vec![
+            "2027-01-01T09:00:00.000Z",
+            "2028-01-01T09:00:00.000Z",
+            "2029-01-01T09:00:00.000Z",
+        ]
+    );
+
+    // `and` requires both fields. The expectation is derived from
+    // `weekday_from_civil` — an independently tested primitive — so the
+    // assertion cannot encode the same mistake as the code.
+    let and_hits = rendered("0 9 25 * 5", DomDowMode::And, 3);
+    assert_eq!(and_hits.len(), 3, "and mode must still match some dates");
+    for hit in &and_hits {
+        let year: i64 = hit[0..4].parse().unwrap();
+        let month: u32 = hit[5..7].parse().unwrap();
+        let day: u32 = hit[8..10].parse().unwrap();
+        assert_eq!(day, 25, "{hit} must fall on the 25th");
+        assert_eq!(
+            weekday_from_civil(year, month, day),
+            5,
+            "{hit} must be a Friday"
+        );
+    }
+    // `or` over the same rule is strictly wider: it also admits dates that
+    // satisfy only the day-of-week field, so its first hits are ordinary
+    // Fridays rather than the 25th.
+    let or_hits = rendered("0 9 25 * 5", DomDowMode::Or, 3);
+    assert_eq!(or_hits.len(), 3);
+    for hit in &or_hits {
+        let year: i64 = hit[0..4].parse().unwrap();
+        let month: u32 = hit[5..7].parse().unwrap();
+        let day: u32 = hit[8..10].parse().unwrap();
+        assert_eq!(
+            weekday_from_civil(year, month, day),
+            5,
+            "{hit} must be a Friday"
+        );
+    }
+    assert!(
+        or_hits.iter().any(|hit| !hit.starts_with("2026-09-25")),
+        "or must admit bare day-of-week matches, got {or_hits:?}"
+    );
+}
+
+/// The missed-run scan must stop at `now`.
+///
+/// The scan advances a cursor and keeps the newest slots, so an unbounded scan
+/// retains the *furthest-future* slots rather than the missed ones: a `run_once`
+/// recovery after a six-hour outage would plan an occurrence years ahead and
+/// never run the work that was actually missed.
+#[test]
+fn a_missed_run_plan_never_reports_a_future_slot() {
     let rule = cron_rule("0 * * * *", DstPolicy::SkipDuplicate, MissedPolicy::RunOnce).unwrap();
     let plan = missed_run_plan(
         &rule,
@@ -839,6 +981,434 @@ fn probe_missed_run_never_returns_a_future_slot() {
     assert_eq!(
         plan.due_instants()[0],
         parse_instant_utc("2026-09-25T06:00:00.000Z").unwrap(),
-        "the coalesced slot must be the most recent MISSED one"
+        "the coalesced slot must be the most recent MISSED one, not a future one"
     );
+    // `cursor_after` is the supplied `now`, never a generated instant.
+    assert_eq!(
+        plan.cursor_after,
+        parse_instant_utc("2026-09-25T06:30:00.000Z").unwrap()
+    );
+}
+
+/// The three frozen missed policies must be three *different* answers.
+///
+/// `run_once` keeps one most-recent slot and `skip` keeps none, so an
+/// implementation that forgets to drop the ring for `skip` silently replays
+/// work for exactly the organizations that configured `skip` to avoid a
+/// reconnect burst — the outcome F15's missed-schedule requirement calls out by
+/// name. Nothing else distinguishes the two policies, so this is the only place
+/// the difference can be pinned.
+#[test]
+fn the_three_missed_policies_produce_three_different_plans() {
+    let cursor = parse_instant_utc("2026-09-25T00:00:00.000Z").unwrap();
+    let now = parse_instant_utc("2026-09-25T06:30:00.000Z").unwrap();
+    let rendered = |plan: &MissedRunPlan| -> Vec<String> {
+        plan.due_instants()
+            .iter()
+            .map(|epoch| format_instant_utc(*epoch).unwrap())
+            .collect()
+    };
+
+    // `skip` produces no occurrence at all.
+    let skip_rule = cron_rule("0 * * * *", DstPolicy::SkipDuplicate, MissedPolicy::Skip).unwrap();
+    let skipped = missed_run_plan(&skip_rule, &utc(), cursor, now).unwrap();
+    assert!(
+        rendered(&skipped).is_empty(),
+        "skip must not replay work: {:?}",
+        rendered(&skipped)
+    );
+    // The slots were still considered, which is what `missed_slots` reports.
+    assert_eq!(skipped.missed_slots, 6);
+
+    // `run_once` coalesces forward to the most recent missed slot.
+    let once_rule =
+        cron_rule("0 * * * *", DstPolicy::SkipDuplicate, MissedPolicy::RunOnce).unwrap();
+    let once = missed_run_plan(&once_rule, &utc(), cursor, now).unwrap();
+    assert_eq!(rendered(&once), vec!["2026-09-25T06:00:00.000Z"]);
+    assert_eq!(once.missed_slots, 6);
+
+    // `catch_up` replays the newest bounded slots in ascending order. It is the
+    // only policy that carries a limit, so it is built through the wire path
+    // that accepts one.
+    let catch_up_rule: ScheduleRule = serde_json::from_value(serde_json::json!({
+        "kind": "cron",
+        "expression": "0 * * * *",
+        "timezone": "UTC",
+        "dom_dow_mode": "or",
+        "dst_policy": "skip_duplicate",
+        "missed_policy": "catch_up",
+        "catch_up_limit": 3,
+    }))
+    .unwrap();
+    let caught_up = missed_run_plan(&catch_up_rule, &utc(), cursor, now).unwrap();
+    assert_eq!(
+        rendered(&caught_up),
+        vec![
+            "2026-09-25T04:00:00.000Z",
+            "2026-09-25T05:00:00.000Z",
+            "2026-09-25T06:00:00.000Z",
+        ]
+    );
+    assert!(
+        caught_up.truncated,
+        "dropping three older slots is a truncation"
+    );
+
+    // Re-planning the same window is deterministic for every policy.
+    for rule in [skip_rule, once_rule, catch_up_rule] {
+        assert_eq!(
+            missed_run_plan(&rule, &utc(), cursor, now).unwrap(),
+            missed_run_plan(&rule, &utc(), cursor, now).unwrap(),
+            "{rule:?} must be deterministic"
+        );
+    }
+}
+
+/// `pending` must be able to reach `skipped` and `missed` directly.
+///
+/// The frozen table lists `pending|dispatching|leased` for both edges. Returning
+/// `pending` unchanged instead leaves a dropped or unreachable slot looking
+/// dispatchable forever, so it is re-offered to devices on every pass and never
+/// reaches a terminal state.
+#[test]
+fn a_pending_occurrence_can_be_skipped_or_missed_directly() {
+    assert_eq!(
+        transition(
+            OccurrenceState::Pending,
+            OccurrenceEvent::Skipped(DomainError::AutomationOverlapPolicy),
+        ),
+        Ok(OccurrenceState::Skipped)
+    );
+    assert_eq!(
+        transition(OccurrenceState::Pending, OccurrenceEvent::Missed),
+        Ok(OccurrenceState::Missed)
+    );
+    for state in [
+        OccurrenceState::Pending,
+        OccurrenceState::Dispatching,
+        OccurrenceState::Leased,
+    ] {
+        assert_eq!(
+            transition(
+                state,
+                OccurrenceEvent::Skipped(DomainError::AutomationOverlapPolicy)
+            ),
+            Ok(OccurrenceState::Skipped),
+            "{state:?} -> skipped"
+        );
+        assert_eq!(
+            transition(state, OccurrenceEvent::Missed),
+            Ok(OccurrenceState::Missed),
+            "{state:?} -> missed"
+        );
+    }
+}
+
+/// `succeeded` is reachable only from `started`.
+///
+/// The gate requires the server to durably create or discover the P05 run/link
+/// during the idempotent `start` transition before a host may execute anything. A
+/// `leased` occurrence that never started has no run binding, so allowing it to
+/// report success would let a host settle a run that was never created.
+#[test]
+fn success_requires_a_durable_started_transition() {
+    assert_eq!(
+        transition(OccurrenceState::Started, OccurrenceEvent::Succeeded),
+        Ok(OccurrenceState::Succeeded)
+    );
+    for state in [
+        OccurrenceState::Pending,
+        OccurrenceState::Dispatching,
+        OccurrenceState::Leased,
+    ] {
+        assert_eq!(
+            transition(state, OccurrenceEvent::Succeeded),
+            Err(DomainError::AutomationInvalidState),
+            "{state:?} must not report success without a started transition"
+        );
+    }
+}
+
+/// The whole frozen transition table, asserted as an explicit edge list.
+///
+/// A table test is the only shape that catches an *added* edge: an example-based
+/// test passes just as happily when a new transition appears. Every pair is
+/// checked in both directions — each listed edge must be accepted with the right
+/// result, and every unlisted pair must be refused — so widening the graph
+/// anywhere fails here.
+#[test]
+fn the_transition_table_is_exactly_the_frozen_one() {
+    // (from, event, to) for every edge the frozen gate allows.
+    let edges: Vec<(OccurrenceState, OccurrenceEvent, OccurrenceState)> = vec![
+        (
+            OccurrenceState::Pending,
+            OccurrenceEvent::Dispatch,
+            OccurrenceState::Dispatching,
+        ),
+        (
+            OccurrenceState::Dispatching,
+            OccurrenceEvent::Claimed,
+            OccurrenceState::Leased,
+        ),
+        (
+            OccurrenceState::Leased,
+            OccurrenceEvent::Started,
+            OccurrenceState::Started,
+        ),
+        (
+            OccurrenceState::Started,
+            OccurrenceEvent::Succeeded,
+            OccurrenceState::Succeeded,
+        ),
+        (
+            OccurrenceState::Pending,
+            OccurrenceEvent::Failed,
+            OccurrenceState::Failed,
+        ),
+        (
+            OccurrenceState::Dispatching,
+            OccurrenceEvent::Failed,
+            OccurrenceState::Failed,
+        ),
+        (
+            OccurrenceState::Leased,
+            OccurrenceEvent::Failed,
+            OccurrenceState::Failed,
+        ),
+        (
+            OccurrenceState::Started,
+            OccurrenceEvent::Failed,
+            OccurrenceState::Failed,
+        ),
+        (
+            OccurrenceState::Pending,
+            OccurrenceEvent::Cancelled,
+            OccurrenceState::Cancelled,
+        ),
+        (
+            OccurrenceState::Dispatching,
+            OccurrenceEvent::Cancelled,
+            OccurrenceState::Cancelled,
+        ),
+        (
+            OccurrenceState::Leased,
+            OccurrenceEvent::Cancelled,
+            OccurrenceState::Cancelled,
+        ),
+        (
+            OccurrenceState::Started,
+            OccurrenceEvent::Cancelled,
+            OccurrenceState::Cancelled,
+        ),
+        (
+            OccurrenceState::Pending,
+            OccurrenceEvent::Missed,
+            OccurrenceState::Missed,
+        ),
+        (
+            OccurrenceState::Dispatching,
+            OccurrenceEvent::Missed,
+            OccurrenceState::Missed,
+        ),
+        (
+            OccurrenceState::Leased,
+            OccurrenceEvent::Missed,
+            OccurrenceState::Missed,
+        ),
+        (
+            OccurrenceState::Pending,
+            OccurrenceEvent::Skipped(DomainError::AutomationOverlapPolicy),
+            OccurrenceState::Skipped,
+        ),
+        (
+            OccurrenceState::Dispatching,
+            OccurrenceEvent::Skipped(DomainError::AutomationOverlapPolicy),
+            OccurrenceState::Skipped,
+        ),
+        (
+            OccurrenceState::Leased,
+            OccurrenceEvent::Skipped(DomainError::AutomationOverlapPolicy),
+            OccurrenceState::Skipped,
+        ),
+        (
+            OccurrenceState::Leased,
+            OccurrenceEvent::LeaseLost {
+                proved_not_started: true,
+            },
+            OccurrenceState::Pending,
+        ),
+        (
+            OccurrenceState::Leased,
+            OccurrenceEvent::LeaseLost {
+                proved_not_started: false,
+            },
+            OccurrenceState::Ambiguous,
+        ),
+        (
+            OccurrenceState::Started,
+            OccurrenceEvent::LeaseLost {
+                proved_not_started: true,
+            },
+            OccurrenceState::Ambiguous,
+        ),
+        (
+            OccurrenceState::Started,
+            OccurrenceEvent::LeaseLost {
+                proved_not_started: false,
+            },
+            OccurrenceState::Ambiguous,
+        ),
+    ];
+    let all_events = [
+        OccurrenceEvent::Dispatch,
+        OccurrenceEvent::Claimed,
+        OccurrenceEvent::Renewed,
+        OccurrenceEvent::Started,
+        OccurrenceEvent::Succeeded,
+        OccurrenceEvent::Failed,
+        OccurrenceEvent::Cancelled,
+        OccurrenceEvent::Missed,
+        OccurrenceEvent::Skipped(DomainError::AutomationOverlapPolicy),
+        OccurrenceEvent::LeaseLost {
+            proved_not_started: true,
+        },
+        OccurrenceEvent::LeaseLost {
+            proved_not_started: false,
+        },
+    ];
+    // The audited reconciliation edge, checked separately because its target is
+    // supplied by the event rather than fixed by the graph.
+    let reconciliations = [
+        OccurrenceState::Succeeded,
+        OccurrenceState::Failed,
+        OccurrenceState::Cancelled,
+        OccurrenceState::Missed,
+        OccurrenceState::Skipped,
+    ];
+
+    for state in ALL_OCCURRENCE_STATES {
+        for event in all_events {
+            let outcome = transition(state, event);
+            match edges
+                .iter()
+                .find(|(from, ev, _)| *from == state && *ev == event)
+            {
+                Some((_, _, to)) => {
+                    assert_eq!(outcome, Ok(*to), "{state:?} + {event:?} must be {to:?}")
+                }
+                // `renewed` is a self-loop rather than a graph edge, so it is
+                // asserted on its own below.
+                None if matches!(event, OccurrenceEvent::Renewed) => {
+                    assert!(outcome.is_err() || outcome == Ok(state))
+                }
+                None => assert_eq!(
+                    outcome,
+                    Err(DomainError::AutomationInvalidState),
+                    "{state:?} + {event:?} is not a frozen edge and must be refused"
+                ),
+            }
+        }
+    }
+
+    // A renewal is a self-loop on a live lease: it must not change the state,
+    // and it must never be legal from a state that holds no lease.
+    assert_eq!(
+        transition(OccurrenceState::Leased, OccurrenceEvent::Renewed),
+        Ok(OccurrenceState::Leased)
+    );
+    for state in [
+        OccurrenceState::Pending,
+        OccurrenceState::Dispatching,
+        OccurrenceState::Started,
+    ] {
+        assert_eq!(
+            transition(state, OccurrenceEvent::Renewed),
+            Err(DomainError::AutomationInvalidState),
+            "{state:?} holds no lease to renew"
+        );
+    }
+
+    // Reconciliation is only an edge out of `ambiguous`, and only to a terminal
+    // state.
+    for target in reconciliations {
+        assert_eq!(
+            transition(
+                OccurrenceState::Ambiguous,
+                OccurrenceEvent::Reconciled { to: target }
+            ),
+            Ok(target)
+        );
+        for from in ALL_OCCURRENCE_STATES {
+            if from == OccurrenceState::Ambiguous {
+                continue;
+            }
+            assert_eq!(
+                transition(from, OccurrenceEvent::Reconciled { to: target }),
+                Err(DomainError::AutomationInvalidState),
+                "only an ambiguous occurrence is reconciled, not {from:?}"
+            );
+        }
+    }
+
+    // Sanity: the graph is reachable from `pending` to `succeeded` and nowhere
+    // else, and no terminal state has an automatic outgoing edge at all.
+    assert!(
+        ALL_OCCURRENCE_STATES
+            .iter()
+            .filter(|state| state.is_terminal())
+            .all(|state| edges.iter().all(|(from, _, _)| *from != *state))
+    );
+    let mut state = OccurrenceState::Pending;
+    for event in [
+        OccurrenceEvent::Dispatch,
+        OccurrenceEvent::Claimed,
+        OccurrenceEvent::Started,
+        OccurrenceEvent::Succeeded,
+    ] {
+        state = transition(state, event).unwrap();
+    }
+    assert_eq!(state, OccurrenceState::Succeeded);
+}
+
+/// An audited reconciliation resolves an ambiguity; it never re-dispatches it.
+///
+/// `ambiguous` is terminal precisely because the server cannot prove a
+/// disconnected host stopped. An operator resolving that question may record a
+/// definite outcome, but must not be able to route the slot back into
+/// `dispatching` or `leased`, or the "no automatic re-dispatch" boundary would
+/// rest on the caller rather than on the state machine.
+#[test]
+fn an_audited_reconciliation_cannot_return_an_ambiguous_occurrence_to_dispatch() {
+    for terminal in [
+        OccurrenceState::Succeeded,
+        OccurrenceState::Failed,
+        OccurrenceState::Cancelled,
+        OccurrenceState::Missed,
+        OccurrenceState::Skipped,
+    ] {
+        assert_eq!(
+            transition(
+                OccurrenceState::Ambiguous,
+                OccurrenceEvent::Reconciled { to: terminal }
+            ),
+            Ok(terminal),
+            "reconciliation may record {terminal:?}"
+        );
+    }
+    for dispatchable in [
+        OccurrenceState::Pending,
+        OccurrenceState::Dispatching,
+        OccurrenceState::Leased,
+        OccurrenceState::Started,
+        OccurrenceState::Ambiguous,
+    ] {
+        assert_eq!(
+            transition(
+                OccurrenceState::Ambiguous,
+                OccurrenceEvent::Reconciled { to: dispatchable }
+            ),
+            Err(DomainError::AutomationInvalidState),
+            "reconciliation must not reach {dispatchable:?}"
+        );
+    }
 }

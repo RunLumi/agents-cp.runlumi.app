@@ -228,32 +228,62 @@ pub enum OccurrenceEvent {
 /// leased|started → ambiguous
 /// ambiguous → no automatic re-dispatch
 /// ```
+///
+/// Two of those lines are load bearing enough to be worth stating, because
+/// getting either wrong is silent rather than loud:
+///
+/// - `succeeded` is reachable **only** from `started`. The gate requires the
+///   server to durably create or discover the P05 run/link in response to the
+///   idempotent `start` transition before a host may execute any tool, so a
+///   `leased` occurrence that never started has no run binding and must not be
+///   able to report success. The settle route cannot tell a fast start from a
+///   host that skipped `start`, so the state machine has to refuse it.
+/// - `pending → skipped` and `pending → missed` are real edges. Returning
+///   `pending` unchanged instead leaves a dropped or unreachable slot looking
+///   dispatchable forever, so it is re-offered on every pass and never reaches a
+///   terminal state.
 pub fn transition(
     current: OccurrenceState,
     event: OccurrenceEvent,
 ) -> Result<OccurrenceState, DomainError> {
     // A terminal state accepts nothing except an audited reconciliation of an
-    // ambiguous occurrence. Everything else is refused so a late redelivery
+    // ambiguous occurrence, and even that may only record a definite terminal
+    // outcome: routing the slot back to `pending`/`dispatching`/`leased` would
+    // hand it to a second device, which is exactly what `ambiguous` exists to
+    // prevent. Re-queueing that work is a separate, explicit run with its own
+    // occurrence identity. Everything else is refused so a late redelivery
     // cannot rewrite settled history.
     if current.is_terminal() {
         return match (current, event) {
-            (OccurrenceState::Ambiguous, OccurrenceEvent::Reconciled { to }) => Ok(to),
+            (OccurrenceState::Ambiguous, OccurrenceEvent::Reconciled { to })
+                if to.is_terminal() && to != OccurrenceState::Ambiguous =>
+            {
+                Ok(to)
+            }
             _ => Err(DomainError::AutomationInvalidState),
         };
     }
 
     Ok(match (current, event) {
         (OccurrenceState::Pending, OccurrenceEvent::Dispatch) => OccurrenceState::Dispatching,
-        (OccurrenceState::Pending, OccurrenceEvent::Skipped(_))
-        | (OccurrenceState::Pending, OccurrenceEvent::Missed) => current,
+        (OccurrenceState::Pending, OccurrenceEvent::Skipped(_)) => OccurrenceState::Skipped,
+        (OccurrenceState::Pending, OccurrenceEvent::Missed) => OccurrenceState::Missed,
+        // The frozen table also admits `pending` into `failed` and `cancelled`.
+        // A slot can fail or be cancelled before it is ever dispatched — the
+        // schedule was edited, the automation was paused or deleted, or
+        // generation itself failed — and refusing those edges would leave such a
+        // slot `pending` forever.
+        (OccurrenceState::Pending, OccurrenceEvent::Failed) => OccurrenceState::Failed,
+        (OccurrenceState::Pending, OccurrenceEvent::Cancelled) => OccurrenceState::Cancelled,
         (OccurrenceState::Dispatching, OccurrenceEvent::Claimed) => OccurrenceState::Leased,
         (OccurrenceState::Dispatching, OccurrenceEvent::Skipped(_)) => OccurrenceState::Skipped,
         (OccurrenceState::Dispatching, OccurrenceEvent::Missed) => OccurrenceState::Missed,
+        (OccurrenceState::Dispatching, OccurrenceEvent::Failed) => OccurrenceState::Failed,
+        (OccurrenceState::Dispatching, OccurrenceEvent::Cancelled) => OccurrenceState::Cancelled,
         (OccurrenceState::Leased, OccurrenceEvent::Started) => OccurrenceState::Started,
         (OccurrenceState::Leased, OccurrenceEvent::Renewed) => current,
         (OccurrenceState::Leased, OccurrenceEvent::Skipped(_)) => OccurrenceState::Skipped,
         (OccurrenceState::Leased, OccurrenceEvent::Missed) => OccurrenceState::Missed,
-        (OccurrenceState::Leased, OccurrenceEvent::Succeeded) => OccurrenceState::Succeeded,
         (OccurrenceState::Leased, OccurrenceEvent::Failed) => OccurrenceState::Failed,
         (OccurrenceState::Leased, OccurrenceEvent::Cancelled) => OccurrenceState::Cancelled,
         // P06-CR-001: only a PROVEN not-started lease may requeue. Anything

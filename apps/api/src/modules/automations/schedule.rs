@@ -1858,7 +1858,17 @@ pub fn missed_run_plan(
         let Some(last) = batch.last().copied() else {
             break;
         };
+        // The scan is bounded above by `now`. Generation only ever moves forward,
+        // so the first slot at or after `now` ends the window: it is not a missed
+        // run, and nothing beyond it can be one. Without this bound the scan runs
+        // to the candidate budget and the ring keeps the *newest* slots, so a
+        // `run_once` recovery after a short outage would plan an occurrence years
+        // in the future and never run the work that was actually missed.
+        let reached_now = last.scheduled_for_utc >= now_utc;
         for instant in batch {
+            if instant.scheduled_for_utc >= now_utc {
+                continue;
+            }
             match instant.outcome {
                 ScheduleInstantOutcome::Due => {
                     due_slots += 1;
@@ -1876,7 +1886,7 @@ pub fn missed_run_plan(
                 }
             }
         }
-        if last.scheduled_for_utc <= cursor {
+        if reached_now || last.scheduled_for_utc <= cursor {
             break;
         }
         cursor = last.scheduled_for_utc;
@@ -1982,7 +1992,7 @@ fn generate_cron(
                 return Ok(());
             }
             let local = day_base + minute;
-            push_resolved(zone, local, rule.dst_policy, out);
+            push_resolved(zone, local, rule.dst_policy, after_utc, out);
         }
     }
     Ok(())
@@ -2087,7 +2097,7 @@ fn generate_interval(
             continue;
         };
         index += 1;
-        push_resolved(zone, local_epoch, DstPolicy::SkipDuplicate, out);
+        push_resolved(zone, local_epoch, DstPolicy::SkipDuplicate, after_utc, out);
     }
     Ok(())
 }
@@ -2146,38 +2156,60 @@ fn calendar_slot(
 }
 
 /// Apply the frozen DST policy to one local civil slot and push the result.
+///
+/// A repeated local time always emits the first UTC instant; whether the second
+/// instant is due, or is recorded as a deliberate skip, is the frozen policy's
+/// call. A missing local time is always a deliberate skip and is never rolled
+/// into a neighbouring instant.
+///
+/// Anything at or before `after_utc` is dropped. Calendar arithmetic chooses its
+/// start step in local civil terms, so a slot next to a DST transition can
+/// resolve to a UTC instant the cursor has already passed; the resolved instant
+/// is the authority on ordering, never the local one.
 fn push_resolved(
     zone: &ZoneOffsets,
     local_epoch: i64,
     dst_policy: DstPolicy,
+    after_utc: i64,
     out: &mut Vec<ScheduleInstant>,
 ) {
+    let push = |utc: i64, outcome: ScheduleInstantOutcome, out: &mut Vec<ScheduleInstant>| {
+        if utc > after_utc {
+            out.push(ScheduleInstant {
+                scheduled_for_utc: utc,
+                outcome,
+            });
+        }
+    };
     match zone.resolve_local(local_epoch) {
-        LocalResolution::Unique { utc } => out.push(ScheduleInstant {
-            scheduled_for_utc: utc,
-            outcome: ScheduleInstantOutcome::Due,
-        }),
-        LocalResolution::Missing => out.push(ScheduleInstant {
-            scheduled_for_utc: local_epoch,
-            outcome: ScheduleInstantOutcome::Skipped(DomainError::DstMissingTime),
-        }),
+        LocalResolution::Unique { utc } => {
+            push(utc, ScheduleInstantOutcome::Due, out);
+        }
+        LocalResolution::Missing => {
+            // `local_epoch` is not a real instant, but it is the stable identity
+            // of the skipped slot and it is what an operator needs to see.
+            push(
+                local_epoch,
+                ScheduleInstantOutcome::Skipped(DomainError::DstMissingTime),
+                out,
+            );
+        }
         LocalResolution::Repeated {
             first_utc,
             second_utc,
         } => {
-            out.push(ScheduleInstant {
-                scheduled_for_utc: first_utc,
-                outcome: ScheduleInstantOutcome::Due,
-            });
+            push(first_utc, ScheduleInstantOutcome::Due, out);
             match dst_policy {
-                DstPolicy::RunBoth => out.push(ScheduleInstant {
-                    scheduled_for_utc: second_utc,
-                    outcome: ScheduleInstantOutcome::Due,
-                }),
-                DstPolicy::SkipDuplicate => out.push(ScheduleInstant {
-                    scheduled_for_utc: second_utc,
-                    outcome: ScheduleInstantOutcome::Skipped(DomainError::DstRepeatedTime),
-                }),
+                DstPolicy::RunBoth => {
+                    push(second_utc, ScheduleInstantOutcome::Due, out);
+                }
+                DstPolicy::SkipDuplicate => {
+                    push(
+                        second_utc,
+                        ScheduleInstantOutcome::Skipped(DomainError::DstRepeatedTime),
+                        out,
+                    );
+                }
                 DstPolicy::RunFirst => {}
             }
         }
