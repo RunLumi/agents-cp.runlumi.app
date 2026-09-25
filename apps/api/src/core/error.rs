@@ -25,6 +25,19 @@ pub enum CoreError {
     InvalidRequestFingerprint,
     InvalidEndpointScope,
     InvalidSuccessStatus,
+    // P03 device/project domain validation failures.
+    InvalidEnrollmentInput,
+    InvalidPlatform,
+    InvalidAppVersion,
+    InvalidCapabilityReport,
+    InvalidWorkspaceIdentity,
+    InvalidWorkspaceDisplayName,
+    WorkspaceBindingScopeMismatch,
+    InvalidProjectName,
+    InvalidProjectSlug,
+    InvalidProjectVersion,
+    ProjectArchived,
+    InvalidPolicyInputs,
 }
 
 impl fmt::Display for CoreError {
@@ -44,6 +57,18 @@ impl fmt::Display for CoreError {
             Self::InvalidRequestFingerprint => "invalid request fingerprint",
             Self::InvalidEndpointScope => "invalid idempotency endpoint scope",
             Self::InvalidSuccessStatus => "stored response status is not successful",
+            Self::InvalidEnrollmentInput => "invalid device enrollment input",
+            Self::InvalidPlatform => "invalid device platform",
+            Self::InvalidAppVersion => "invalid app version",
+            Self::InvalidCapabilityReport => "invalid device capability report",
+            Self::InvalidWorkspaceIdentity => "invalid workspace identity",
+            Self::InvalidWorkspaceDisplayName => "invalid workspace display name",
+            Self::WorkspaceBindingScopeMismatch => "workspace binding crosses organization scope",
+            Self::InvalidProjectName => "invalid project name",
+            Self::InvalidProjectSlug => "invalid project slug",
+            Self::InvalidProjectVersion => "invalid project version",
+            Self::ProjectArchived => "project is archived",
+            Self::InvalidPolicyInputs => "invalid policy inputs",
         };
         f.write_str(message)
     }

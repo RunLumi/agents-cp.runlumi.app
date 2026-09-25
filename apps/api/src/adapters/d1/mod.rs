@@ -11,6 +11,9 @@ use worker::d1::{D1Database, D1PreparedStatement, D1Result};
 pub enum BindValue<'a> {
     Text(&'a str),
     Integer(i32),
+    /// 64-bit integer bound as a JS number; exact for values below 2^53
+    /// (counters and policy versions stay far below that bound).
+    Int64(i64),
     Null,
 }
 
@@ -35,6 +38,7 @@ impl D1Adapter {
             .map(|value| match value {
                 BindValue::Text(value) => JsValue::from_str(value),
                 BindValue::Integer(value) => JsValue::from_f64(f64::from(*value)),
+                BindValue::Int64(value) => JsValue::from_f64(*value as f64),
                 BindValue::Null => JsValue::NULL,
             })
             .collect::<Vec<_>>();

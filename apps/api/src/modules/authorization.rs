@@ -109,6 +109,11 @@ pub enum Permission {
     TeamsRead,
     TeamsManage,
     AuditRead,
+    // P03-CG (p03-cg-v1): managed devices, projects, and policy visibility.
+    DevicesRead,
+    DevicesManage,
+    ProjectsRead,
+    ProjectsManage,
     Unknown(String),
 }
 
@@ -125,6 +130,10 @@ impl Permission {
             "teams.read" => Self::TeamsRead,
             "teams.manage" => Self::TeamsManage,
             "audit.read" => Self::AuditRead,
+            "devices.read" => Self::DevicesRead,
+            "devices.manage" => Self::DevicesManage,
+            "projects.read" => Self::ProjectsRead,
+            "projects.manage" => Self::ProjectsManage,
             _ => Self::Unknown(value.to_owned()),
         }
     }
@@ -141,6 +150,10 @@ impl Permission {
             Self::TeamsRead => "teams.read",
             Self::TeamsManage => "teams.manage",
             Self::AuditRead => "audit.read",
+            Self::DevicesRead => "devices.read",
+            Self::DevicesManage => "devices.manage",
+            Self::ProjectsRead => "projects.read",
+            Self::ProjectsManage => "projects.manage",
             Self::Unknown(value) => value,
         }
     }
@@ -148,7 +161,12 @@ impl Permission {
     fn requires_verified_email(&self) -> bool {
         !matches!(
             self,
-            Self::OrgRead | Self::MembersRead | Self::TeamsRead | Self::AuditRead
+            Self::OrgRead
+                | Self::MembersRead
+                | Self::TeamsRead
+                | Self::AuditRead
+                | Self::DevicesRead
+                | Self::ProjectsRead
         )
     }
 }
@@ -336,6 +354,10 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::TeamsRead
                 | Permission::TeamsManage
                 | Permission::AuditRead
+                | Permission::DevicesRead
+                | Permission::DevicesManage
+                | Permission::ProjectsRead
+                | Permission::ProjectsManage
         ),
         MembershipRole::Member => matches!(
             permission,
@@ -343,6 +365,8 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::OrgLeave
                 | Permission::MembersRead
                 | Permission::TeamsRead
+                | Permission::DevicesRead
+                | Permission::ProjectsRead
         ),
         MembershipRole::Viewer => matches!(
             permission,
@@ -351,6 +375,8 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::MembersRead
                 | Permission::TeamsRead
                 | Permission::AuditRead
+                | Permission::DevicesRead
+                | Permission::ProjectsRead
         ),
     }
 }

@@ -1,6 +1,9 @@
 pub mod authorization;
+pub mod devices;
 pub mod identity;
 pub mod memberships;
 pub mod organizations;
 pub mod outbox;
+pub mod policy;
+pub mod projects;
 pub mod teams;
