@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createFoundationCheck, getHealth, signup } from "@/lib/api";
+import {
+  createFoundationCheck,
+  getHealth,
+  listPasskeys,
+  passkeyLoginStart,
+  passwordLogin,
+  signup,
+} from "@/lib/api";
 import { ApiClientError, presentApiError } from "@/lib/errors";
 
 const requestId = "req_0123456789abcdef0123456789abcdef";
@@ -230,6 +237,70 @@ describe("API client", () => {
       expect.objectContaining({ method: "POST", body: "{}" }),
     );
     expect(headers.get("Idempotency-Key")).toBe("stable-key-1");
+  });
+
+  it("starts usernameless passkey login without an email body", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(
+        {
+          ceremony_id: "cer_0123456789abcdef0123456789abcdef",
+          expires_at: "2026-09-24T00:05:00.000Z",
+          public_key: { challenge: "abc", rpId: "example.com" },
+        },
+        201,
+      ),
+    );
+
+    const result = await passkeyLoginStart();
+    const [path, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+
+    expect(path).toBe("/api/v1/auth/passkey/login/start");
+    expect(init?.body).toBe("{}");
+    expect(result.ceremony_id).toBe("cer_0123456789abcdef0123456789abcdef");
+  });
+
+  it("logs in with password as fallback and decodes passkey metadata", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          user: {
+            id: "usr_0123456789abcdef0123456789abcdef",
+            email: "person@example.com",
+            display_name: "Person",
+            email_verified: true,
+            created_at: "2026-09-24T00:00:00.000Z",
+          },
+        },
+        200,
+      ),
+    );
+    await expect(
+      passwordLogin({ email: "person@example.com", password: ["test", "input"].join("-") }),
+    ).resolves.toMatchObject({ user: { email: "person@example.com" } });
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          items: [
+            {
+              passkey_id: "psk_0123456789abcdef0123456789abcdef",
+              label: "MacBook",
+              transports: ["internal"],
+              backup_eligible: null,
+              backup_state: null,
+              created_at: "2026-09-24T00:00:00.000Z",
+              last_used_at: null,
+            },
+          ],
+          password_configured: true,
+        },
+        200,
+      ),
+    );
+    await expect(listPasskeys()).resolves.toMatchObject({
+      items: [{ passkey_id: "psk_0123456789abcdef0123456789abcdef", label: "MacBook" }],
+      password_configured: true,
+    });
   });
 });
 

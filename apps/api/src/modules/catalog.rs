@@ -83,7 +83,7 @@ impl CatalogLifecycle {
     /// Deprecated catalog entries remain readable but are not selected for a
     /// new route. Disabled entries are never selected for new inference.
     pub const fn allows_new_routes(self) -> bool {
-        matches!(self, Self::Active | Self::Deprecated)
+        matches!(self, Self::Active)
     }
 }
 
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn deprecated_models_remain_readable_but_not_newly_routable() {
-        assert!(CatalogLifecycle::Deprecated.allows_new_routes());
+        assert!(!CatalogLifecycle::Deprecated.allows_new_routes());
         assert!(!CatalogLifecycle::Disabled.allows_new_routes());
     }
 }

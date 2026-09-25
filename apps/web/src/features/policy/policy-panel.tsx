@@ -63,6 +63,15 @@ export function PolicyPanel({ orgId }: PolicyPanelProps) {
     );
   }
 
+  if (!state.snapshot.persisted) {
+    return (
+      <p className="text-sm text-[var(--muted-strong)]">
+        No device policy snapshot has been published for this organization yet. The Models &amp;
+        Routing policy remains available independently.
+      </p>
+    );
+  }
+
   const expired = state.snapshot.expires_at <= new Date().toISOString();
 
   return (

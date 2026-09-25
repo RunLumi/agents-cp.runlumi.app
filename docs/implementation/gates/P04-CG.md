@@ -5,6 +5,7 @@
 - State: frozen
 - Contract version: `p04-cg-v1`
 - Inputs: Plan00, Plan04, F09, F10, F11, F12 foundations, F21, F23, ADR 0001–0005, P02-CG `p02-cg-v1`, P02 downstream handoff
+- Additive clarification: `docs/implementation/change-requests/P04-CR-002.md`
 - Shared-file owner: P04 coordinator
 - Previous phase: P02 complete; P03 may extend project/device/policy contracts without changing the definitions below
 
@@ -32,7 +33,7 @@ The public contract does not expose Cloudflare AI Gateway types, provider SDK ty
 
 - IDs use `<prefix>_<32 lowercase hexadecimal characters>` and are opaque to clients.
 - P04 prefixes are `prv_` provider, `pe_` endpoint, `mdl_` model, `mal_` alias, `cred_` credential, `rte_` route, `rtv_` route version, `use_` usage event, and `bud_` budget reservation.
-- `org_id` is required on organization-owned catalog, route, credential, inference, usage, and health rows. A platform credential/provider is the only nullable organization scope and is never treated as a caller-selected tenant scope.
+- `org_id` is required on organization-owned catalog, route, credential, inference, usage, and health rows. Platform credentials/providers may use a null organization scope; local-only capability metadata is creator-scoped, excluded from organization enumeration, and never treated as a caller-selected tenant scope.
 - `project_id` is an optional opaque scope in the policy and usage envelopes. P04 preserves it when supplied by a trusted P03 policy snapshot; P04 does not invent project membership semantics.
 - IDs, email domains, model names, client headers, and route config are never authorization evidence. Every protected operation reuses P02 principal/session/current-membership authorization.
 - Timestamps are RFC 3339 UTC text. Monetary values are integer minor units plus an explicit currency and pricing version.
@@ -70,7 +71,7 @@ Credential ownership is an additional resource-scope check after the central per
 active ↔ deprecated → disabled
 ```
 
-Disabling prevents new routed inference but does not rewrite historical usage records or route versions.
+Disabling prevents new routed inference but does not rewrite historical usage records or route versions. Deprecated entries remain readable for migration/audit but are not eligible for new inference or new route validation.
 
 ### Credential lifecycle
 
@@ -80,7 +81,7 @@ active → revoked
 rotating → active
 ```
 
-Rotation creates a new credential/version and revokes or expires the prior version after the configured overlap. A revoked credential is excluded from new resolution immediately. A local-only credential contains metadata/fingerprint only and is never uploaded.
+Rotation creates a new credential/version and immediately revokes the prior version in the P04 slice; configurable overlap/in-flight rotation semantics remain a P05 credential-lifecycle extension. A revoked credential is excluded from new resolution immediately. A local-only credential contains metadata/fingerprint only and is never uploaded.
 
 ### Route lifecycle
 
@@ -110,8 +111,11 @@ All routes are under `/api/v1`, use the P01 JSON error envelope, and return `X-R
 
 | Method | Path | Permission/context | Request | Success |
 |---|---|---|---|---|
-| GET | `/orgs/:org_id/catalog` | `models.read` | — | `{providers,models,aliases,catalog_version}` |
+| GET | `/orgs/:org_id/catalog` | `models.read` | — | `{providers,models,aliases,health,catalog_version}` |
 | POST | `/orgs/:org_id/catalog/providers` | `models.manage` | `{provider_key,display_name,adapter,endpoint_url?}` | `201 {provider}` |
+| PATCH | `/orgs/:org_id/catalog/providers/:provider_id` | `models.manage` | `{lifecycle,version}` | `200 {provider}` |
+| PATCH | `/orgs/:org_id/catalog/models/:model_id` | `models.manage` | `{lifecycle,version}` | `200 {model}` |
+| GET/PUT | `/orgs/:org_id/policy` | `models.read` / `models.manage` | policy allowlists, credential mode, and version | `200 {policy}`; integrated P03 reads may include `persisted: false` when no device snapshot exists |
 | POST | `/orgs/:org_id/catalog/models` | `models.manage` | `{provider_id,provider_model_id,display_name,capabilities,max_input_tokens?,max_output_tokens?}` | `201 {model}` |
 | GET | `/orgs/:org_id/credentials` | `credentials.read` | `limit?,cursor?` | `200 Page<CredentialMetadata>` |
 | POST | `/orgs/:org_id/credentials` | `credentials.manage` + verified email | `{provider_id,owner_type,label,secret}` | `201 {credential}`; never returns `secret` |
@@ -122,6 +126,7 @@ All routes are under `/api/v1`, use the P01 JSON error envelope, and return `X-R
 | POST | `/orgs/:org_id/routes/:route_id/publish` | `routes.manage` + `Idempotency-Key` | `{version,config}` | `200 {route,version}` |
 | POST | `/orgs/:org_id/routes/:route_id/rollback` | `routes.manage` + `Idempotency-Key` | `{version}` | `200 {route,version}` |
 | GET | `/orgs/:org_id/routes/:route_id/history` | `routes.read` | `limit?,cursor?` | `200 Page<RouteVersion>` |
+| PATCH | `/orgs/:org_id/routes/:route_id` | `routes.manage` | `{lifecycle,version}` | `200 {route}` |
 | GET | `/inference/models` | `models.read` + `X-Org-ID` | `limit?,cursor?` | `200 Page<ModelAliasView>` |
 | GET | `/inference/routes/:alias` | `routes.read` + `X-Org-ID` | — | `200 {route,version}` without credential material |
 | POST | `/inference/responses` | `inference.use` + `X-Org-ID` | native request, `stream` default true | SSE native events or JSON response |
@@ -181,7 +186,7 @@ Normalized upstream error taxonomy:
 
 `connection_failed`, `timeout`, `rate_limited`, `provider_unavailable`, `invalid_request`, `invalid_response`, `credential_rejected`, `unsupported_capability`, `content_filtered`.
 
-The client-facing stable reasons are `model_not_allowed`, `route_unavailable`, `provider_unavailable`, `provider_rate_limited`, `request_timeout`, `budget_exceeded`, `rate_limit_exceeded`, `credential_unavailable`, `unsupported_capability`, `upstream_invalid_response`, and `ssrf_blocked`.
+The client-facing stable reasons are `model_not_allowed`, `route_unavailable`, `provider_unavailable`, `provider_rate_limited`, `request_timeout`, `budget_exceeded`, `budget_state_unavailable`, `rate_limit_exceeded`, `credential_unavailable`, `unsupported_capability`, `upstream_invalid_response`, and `ssrf_blocked`.
 
 ## Credential and secret contract
 
@@ -194,7 +199,7 @@ The client-facing stable reasons are `model_not_allowed`, `route_unavailable`, `
 
 ## Usage and budget contract
 
-Each dispatched request can create one immutable `UsageEvent` with request/run/org/project/principal/session/device scope, alias/route version, provider/model, input/output/cached tokens, provider usage, estimated/actual cost, currency/pricing version, timestamps, latency, fallback count, and budget decision. Content is excluded.
+Each dispatched request can create one immutable `UsageEvent` with request/run/org/project/principal/session/device scope, alias/route version, provider/model, input/output/cached tokens, provider usage, estimated/actual cost, currency/pricing version, timestamps, TTFT/total latency, fallback count, and budget decision. Content is excluded.
 
 Before dispatch, a `BudgetHook` returns `allow`, `deny`, or `unavailable`. Hard-budget mode fails closed with `budget_exceeded` or `budget_state_unavailable`; local-only execution is not failed merely because cloud budget state is unavailable. Reservations are bounded by an input/output token estimate and reconciled after completion/failure.
 
@@ -204,11 +209,16 @@ Material mutations append P01 `EventEnvelope` records and immutable security/aud
 
 - `model_catalog.provider_created.v1`
 - `model_catalog.model_created.v1`
+- `model_catalog.provider_lifecycle_changed.v1`
+- `model_catalog.model_lifecycle_changed.v1`
+- `model_policy.updated.v1`
 - `credential.created.v1`
 - `credential.rotated.v1`
 - `credential.revoked.v1`
+- `route.draft_created.v1`
 - `route.published.v1`
 - `route.rolled_back.v1`
+- `route.lifecycle_changed.v1`
 - `inference.requested.v1`
 - `inference.completed.v1`
 - `inference.failed.v1`
@@ -218,12 +228,12 @@ Every event carries the P01 request/correlation IDs. Provider/model/tenant IDs b
 
 ## Persistence skeleton
 
-Migration `0007_p04_ai_platform.sql` creates:
+Migration `0009_p04_ai_platform.sql` creates:
 
 - `providers`, `provider_endpoints`, `models`, `model_aliases`;
 - `org_model_policies`;
 - `credentials`;
-- `routes`, immutable `route_versions`;
+- `routes`, immutable `route_versions` (draft rows have no `published_at`; publishing creates a published immutable pointer);
 - `provider_health`;
 - `inference_requests`, `usage_events`, `budget_reservations`, and `budgets`.
 
@@ -238,20 +248,22 @@ Invariant-bearing uniqueness/indexes include provider/model identity, `(org_id, 
   "version": 1,
   "allowed_aliases": ["coding-default"],
   "allowed_models": [],
-  "credential_mode": "platform_or_org",
+  "credential_mode": "platform_or_organization",
   "managed_route_enabled": true,
   "project_id": null
 }
 ```
 
-P04 filters route candidates by capabilities, model/provider allowlists, lifecycle, and credential mode. P03 may add project/device policy fields or a signed snapshot transport without redefining aliases, provider IDs, credential ownership, route versions, or the authorization decision. A missing P03 extension is not authority to broaden access.
+P04 filters route candidates by capabilities, model/provider allowlists, lifecycle, and credential mode. P03 may add project/device policy fields or a signed snapshot transport without redefining aliases, provider IDs, credential ownership, route versions, or the authorization decision. The frozen P03 `models.schema_version: 0` opaque placeholder is treated as no model override; a malformed P04-shaped section fails closed. A missing P03 extension is not authority to broaden access.
 
 ## Fixtures
 
-The local fixture uses two development-only mock providers:
+The local fixture uses four development-only mock providers:
 
 - `mock://lumi-fail` with model `mock-fail` — fails before output;
-- `mock://lumi-success` with model `mock-success` — emits two text deltas and usage.
+- `mock://lumi-success` with model `mock-success` — emits two text deltas and usage;
+- `mock://lumi-post-output-failure` with model `mock-post-output-failure` — emits a text delta and then fails, proving commitment prevents fallback;
+- `mock://lumi-timeout` with model `mock-timeout` — non-streaming requests never emit a byte, proving the dispatch/read deadline is classified as `request_timeout`; streaming requests emit one event and remain pending to exercise downstream cancellation handling.
 
 An organization configures an encrypted managed credential, publishes `coding-default` with both candidates, streams by alias, observes fallback, verifies usage attribution, and rolls back the route version. The fixture never contains a real secret or provider response body in logs.
 
@@ -267,6 +279,6 @@ An organization configures an encrypted managed credential, publishes `coding-de
 
 - Contract Gate file: `docs/implementation/gates/P04-CG.md`
 - Contract version: `p04-cg-v1`
-- Freeze commit: recorded by the P04 coordinator after the gate commit
+- Freeze commit: `57b2df9` (P04-CG)
 - Unlocked packets: `P04-MOD-01..04`, `P04-BE-01..05`, `P04-FE-01..03`, `P04-INT-01..02`, `P04-QA-01`
 - Shared files: P04 coordinator owns router, module declarations, Wrangler configuration, migrations, package manifests, and STATUS.

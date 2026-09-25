@@ -53,7 +53,7 @@ Desktop (scripted Ed25519 client, Node crypto)
 ## Evidence
 
 - Tests: Vitest 11/11, Rust 102/102, clippy `-D warnings`, cargo fmt, wasm32 check, hosted `quality` workflow PASS on PRs #11 and #14.
-- Local smoke: `apps/api/scripts/p03-smoke.mjs` — **16/16 checks PASS** against `wrangler dev --env development` (local D1 + Queues), covering the full journey above including replay/conflict/stale-membership negatives.
+- Local smoke: `apps/api/scripts/p03-smoke.mjs` — **17/17 checks PASS** against `wrangler dev --env development` (local D1 + Queues), covering the full journey above including the integrated P03 snapshot/P04 policy view, replay/conflict/stale-membership negatives. When no device snapshot exists, the combined route returns the P04 default model-policy view with `persisted: false`; the P03 policy panel renders that as the explicit empty state rather than treating it as a published device snapshot. The same combined Worker persist also passed the P04 vertical smoke after the policy-route delegation was merged.
 - Browser/keyboard: dashboard sections follow the P02 panel patterns (focus-visible rings, `aria` labels, loading/empty/error/retry states); devices/projects sections reachable from the org nav; smoke asserts stable `error.code`/`details.reason` so the UI branches on codes, never messages.
 - Request IDs: smoke requests carry and echo `X-Request-ID`; device enrollment/approval/revoke append immutable `security_events`; binding/project lifecycle events flow through the outbox.
 - Migration/rollback: `0007` applied cleanly to local development D1; append-only repair strategy.

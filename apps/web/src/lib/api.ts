@@ -159,6 +159,199 @@ export interface ReauthResponse {
   expires_at: string;
 }
 
+export type ModelCapability =
+  | "text"
+  | "vision"
+  | "tools"
+  | "structured_output"
+  | "reasoning"
+  | "audio"
+  | "embeddings";
+
+export interface CatalogProvider {
+  provider_id: string;
+  provider_key: string;
+  display_name: string;
+  adapter: "openai_compatible" | "anthropic" | "mock";
+  lifecycle: "active" | "deprecated" | "disabled";
+  version: number;
+  endpoint_id: string | null;
+  endpoint_url?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CatalogModel {
+  model_id: string;
+  provider_id: string;
+  provider_model_id: string;
+  display_name: string;
+  capabilities: ModelCapability[];
+  max_input_tokens: number | null;
+  max_output_tokens: number | null;
+  lifecycle: "active" | "deprecated" | "disabled";
+  pricing_version: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelAlias {
+  alias_id: string;
+  alias: string;
+  display_name: string;
+  lifecycle: "active" | "deprecated" | "disabled";
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProviderHealth {
+  provider_id: string;
+  state: "ready" | "degraded" | "cooldown";
+  cooldown_until: string | null;
+  last_error_code: string | null;
+  success_count: number;
+  failure_count: number;
+  timeout_count: number;
+  rate_limit_count: number;
+  sample_count: number;
+  ttft_ms_total: number;
+  completion_latency_ms_total: number;
+  updated_at: string;
+}
+
+export interface CatalogResponse {
+  catalog_version: string;
+  providers: CatalogProvider[];
+  models: CatalogModel[];
+  aliases: ModelAlias[];
+  health: ProviderHealth[];
+}
+
+export interface CredentialMetadata {
+  credential_id: string;
+  org_id: string | null;
+  owner_type: "platform" | "organization" | "user" | "service_account" | "local_only";
+  owner_user_id: string | null;
+  provider_id: string;
+  label: string;
+  status: "active" | "rotating" | "revoked";
+  version: number;
+  fingerprint: string;
+  key_version: string | null;
+  parent_credential_id: string | null;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+  has_secret: boolean;
+}
+
+export interface CredentialResponse {
+  credential: CredentialMetadata;
+  duplicate: boolean;
+}
+
+export interface RouteCandidate {
+  provider_id: string;
+  model_id: string;
+  weight: number;
+  timeout_ms: number;
+  max_retries: number;
+  credential_id: string | null;
+}
+
+export interface RouteConfig {
+  strategy: "fixed" | "ordered_fallback" | "weighted_health_aware";
+  candidates: RouteCandidate[];
+}
+
+export interface Route {
+  route_id: string;
+  org_id: string;
+  alias: string;
+  display_name: string;
+  strategy: RouteConfig["strategy"];
+  lifecycle: "draft" | "published" | "disabled";
+  active_version_id: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RouteVersion {
+  route_version_id: string;
+  route_id: string;
+  version: number;
+  config: RouteConfig;
+  config_hash: string;
+  created_by_user_id: string;
+  created_at: string;
+  published_at: string | null;
+}
+
+export interface RouteResponse {
+  route: Route;
+  version: RouteVersion | null;
+  duplicate: boolean;
+}
+
+export interface UsageMetadata {
+  usage_event_id: string;
+  request_id: string;
+  org_id: string;
+  project_id: string | null;
+  run_id: string | null;
+  principal_user_id: string;
+  session_id: string | null;
+  device_id: string | null;
+  model_alias: string;
+  route_version_id: string;
+  provider_id: string;
+  model_id: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_tokens: number | null;
+  provider_usage: Record<string, unknown>;
+  estimated_cost_minor: number | null;
+  actual_cost_minor: number | null;
+  currency: string | null;
+  pricing_version: string | null;
+  budget_decision: string;
+  ttft_ms: number | null;
+  total_latency_ms: number | null;
+  created_at: string;
+}
+
+export interface ModelPolicy {
+  org_id: string;
+  policy_version: number;
+  allowed_aliases: string[] | null;
+  allowed_models: string[] | null;
+  allowed_providers: string[] | null;
+  credential_mode:
+    | "platform_only"
+    | "organization_only"
+    | "user_allowed"
+    | "platform_or_organization"
+    | "local_direct"
+    | "ordered_fallback";
+  managed_route_enabled: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelAliasView {
+  alias: string;
+  display_name: string;
+  lifecycle: string;
+  description: string | null;
+  route_id: string | null;
+  route_version_id: string | null;
+  available: boolean;
+}
+
 type Decoder<T> = (value: unknown) => value is T;
 type JsonObject = Record<string, unknown>;
 
@@ -256,6 +449,218 @@ export async function refreshSession(signal?: AbortSignal): Promise<AuthResponse
     "/api/v1/auth/refresh",
     { method: "POST", body: {}, ...(signal ? { signal } : {}) },
     isAuthResponse,
+  );
+}
+
+export interface CeremonyStartResponse {
+  ceremony_id: string;
+  expires_at: string;
+  public_key: Record<string, unknown>;
+}
+
+export interface PasskeySummary {
+  passkey_id: string;
+  label: string;
+  transports: string[];
+  backup_eligible: boolean | null;
+  backup_state: boolean | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface PasskeyListResponse {
+  items: PasskeySummary[];
+  password_configured: boolean;
+}
+
+export interface PasswordStatusResponse {
+  configured: boolean;
+}
+
+export async function passkeySignupStart(
+  input: { email: string; display_name: string },
+  signal?: AbortSignal,
+): Promise<CeremonyStartResponse> {
+  return requestJson(
+    "/api/v1/auth/passkey/signup/start",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isCeremonyStartResponse,
+  );
+}
+
+export async function passkeySignupComplete(
+  input: { ceremony_id: string; credential: Record<string, unknown> },
+  signal?: AbortSignal,
+): Promise<UserResponse> {
+  return requestJson(
+    "/api/v1/auth/passkey/signup/complete",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isUserResponse,
+  );
+}
+
+export async function passkeyLoginStart(signal?: AbortSignal): Promise<CeremonyStartResponse> {
+  return requestJson(
+    "/api/v1/auth/passkey/login/start",
+    { method: "POST", body: {}, ...(signal ? { signal } : {}) },
+    isCeremonyStartResponse,
+  );
+}
+
+export async function passkeyLoginComplete(
+  input: { ceremony_id: string; credential: Record<string, unknown> },
+  signal?: AbortSignal,
+): Promise<AuthResponse> {
+  return requestJson(
+    "/api/v1/auth/passkey/login/complete",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isAuthResponse,
+  );
+}
+
+export async function passwordSignup(
+  input: { email: string; display_name: string; password: string },
+  signal?: AbortSignal,
+): Promise<UserResponse> {
+  return requestJson(
+    "/api/v1/auth/password/signup",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isUserResponse,
+  );
+}
+
+export async function passwordLogin(
+  input: { email: string; password: string },
+  signal?: AbortSignal,
+): Promise<AuthResponse> {
+  return requestJson(
+    "/api/v1/auth/password/login",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isAuthResponse,
+  );
+}
+
+export async function passwordForgot(
+  input: { email: string },
+  signal?: AbortSignal,
+): Promise<ChallengeResponse> {
+  return requestJson(
+    "/api/v1/auth/password/forgot",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isChallengeResponse,
+  );
+}
+
+export async function passwordReset(
+  input: { challenge_id: string; code: string; password: string },
+  signal?: AbortSignal,
+): Promise<void> {
+  await requestJson(
+    "/api/v1/auth/password/reset",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isEmptyResponse,
+  );
+}
+
+export async function listPasskeys(signal?: AbortSignal): Promise<PasskeyListResponse> {
+  return requestJson("/api/v1/account/passkeys", signal ? { signal } : {}, isPasskeyListResponse);
+}
+
+export async function passkeyRegisterStart(
+  input: { label: string; reauth_grant_id: string; reauth_token: string },
+  signal?: AbortSignal,
+): Promise<CeremonyStartResponse> {
+  return requestJson(
+    "/api/v1/account/passkeys/register/start",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isCeremonyStartResponse,
+  );
+}
+
+export async function passkeyRegisterComplete(
+  input: { ceremony_id: string; credential: Record<string, unknown> },
+  signal?: AbortSignal,
+): Promise<{ passkey_id: string }> {
+  return requestJson(
+    "/api/v1/account/passkeys/register/complete",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isPasskeyIdResponse,
+  );
+}
+
+export async function revokePasskey(
+  passkeyId: string,
+  input: { reauth_grant_id: string; reauth_token: string },
+  signal?: AbortSignal,
+): Promise<void> {
+  await requestJson(
+    `/api/v1/account/passkeys/${encodeURIComponent(passkeyId)}`,
+    { method: "DELETE", body: input, ...(signal ? { signal } : {}) },
+    isEmptyResponse,
+  );
+}
+
+export async function renamePasskey(
+  passkeyId: string,
+  input: { label: string; reauth_grant_id: string; reauth_token: string },
+  signal?: AbortSignal,
+): Promise<{ passkey_id: string; label: string }> {
+  return requestJson(
+    `/api/v1/account/passkeys/${encodeURIComponent(passkeyId)}`,
+    { method: "PATCH", body: input, ...(signal ? { signal } : {}) },
+    isPasskeyRenameResponse,
+  );
+}
+
+export async function passwordStatus(signal?: AbortSignal): Promise<PasswordStatusResponse> {
+  return requestJson(
+    "/api/v1/account/password/status",
+    signal ? { signal } : {},
+    isPasswordStatusResponse,
+  );
+}
+
+export async function setAccountPassword(
+  input: { password: string; reauth_grant_id: string; reauth_token: string },
+  signal?: AbortSignal,
+): Promise<void> {
+  await requestJson(
+    "/api/v1/account/password",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isEmptyResponse,
+  );
+}
+
+export async function reauthPasskeyStart(
+  input: { purpose: string },
+  signal?: AbortSignal,
+): Promise<CeremonyStartResponse> {
+  return requestJson(
+    "/api/v1/account/reauth/passkey/start",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isCeremonyStartResponse,
+  );
+}
+
+export async function reauthPasskeyComplete(
+  input: { ceremony_id: string; credential: Record<string, unknown> },
+  signal?: AbortSignal,
+): Promise<{ grant: ReauthResponse }> {
+  return requestJson(
+    "/api/v1/account/reauth/passkey/complete",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isReauthGrantResponse,
+  );
+}
+
+export async function reauthWithPassword(
+  input: { purpose: string; password: string },
+  signal?: AbortSignal,
+): Promise<{ grant: ReauthResponse }> {
+  return requestJson(
+    "/api/v1/account/reauth/password",
+    { method: "POST", body: input, ...(signal ? { signal } : {}) },
+    isReauthGrantResponse,
   );
 }
 
@@ -480,6 +885,282 @@ export async function listSecurityEvents(signal?: AbortSignal): Promise<Page<Sec
     "/api/v1/account/security-events",
     signal ? { signal } : {},
     isSecurityEventPage,
+  );
+}
+
+export async function createProvider(
+  orgId: string,
+  input: {
+    provider_key: string;
+    display_name: string;
+    adapter: CatalogProvider["adapter"];
+    endpoint_url: string;
+  },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<{ provider: CatalogProvider }> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/catalog/providers`,
+    { method: "POST", body: input, idempotencyKey, ...(signal ? { signal } : {}) },
+    (value): value is { provider: CatalogProvider } =>
+      isObject(value) && isCatalogProvider(value.provider),
+  );
+}
+
+export async function createModel(
+  orgId: string,
+  input: {
+    provider_id: string;
+    provider_model_id: string;
+    display_name: string;
+    capabilities: ModelCapability[];
+    max_input_tokens?: number;
+    max_output_tokens?: number;
+    pricing_version?: string;
+  },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<{ model: CatalogModel }> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/catalog/models`,
+    { method: "POST", body: input, idempotencyKey, ...(signal ? { signal } : {}) },
+    (value): value is { model: CatalogModel } => isObject(value) && isCatalogModel(value.model),
+  );
+}
+
+export async function getCatalog(orgId: string, signal?: AbortSignal): Promise<CatalogResponse> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/catalog`,
+    signal ? { signal } : {},
+    isCatalogResponse,
+  );
+}
+
+export async function listCredentials(
+  orgId: string,
+  signal?: AbortSignal,
+): Promise<Page<CredentialMetadata>> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/credentials`,
+    signal ? { signal } : {},
+    isCredentialPage,
+  );
+}
+
+export async function createCredential(
+  orgId: string,
+  input: {
+    provider_id: string;
+    owner_type: "organization" | "user" | "local_only";
+    label: string;
+    secret?: string;
+  },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<CredentialResponse> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/credentials`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isCredentialResponse,
+  );
+}
+
+export async function rotateCredential(
+  orgId: string,
+  credentialId: string,
+  input: { label?: string; secret: string },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<CredentialResponse> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/credentials/${encodeURIComponent(credentialId)}/rotate`,
+    {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isCredentialResponse,
+  );
+}
+
+export async function revokeCredential(
+  orgId: string,
+  credentialId: string,
+  version: number,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<CredentialMetadata> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/credentials/${encodeURIComponent(credentialId)}/revoke`,
+    {
+      method: "POST",
+      body: { version },
+      idempotencyKey,
+      ...(signal ? { signal } : {}),
+    },
+    isCredentialMetadata,
+  );
+}
+
+export async function listRoutes(orgId: string, signal?: AbortSignal): Promise<Page<Route>> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/routes`,
+    signal ? { signal } : {},
+    isRoutePage,
+  );
+}
+
+export async function createRoute(
+  orgId: string,
+  input: {
+    alias: string;
+    display_name: string;
+    strategy: RouteConfig["strategy"];
+    config: RouteConfig;
+  },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RouteResponse> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/routes`,
+    { method: "POST", body: input, idempotencyKey, ...(signal ? { signal } : {}) },
+    isRouteResponse,
+  );
+}
+
+export async function publishRoute(
+  orgId: string,
+  routeId: string,
+  input: { version: number; config: RouteConfig },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RouteResponse> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/routes/${encodeURIComponent(routeId)}/publish`,
+    { method: "POST", body: input, idempotencyKey, ...(signal ? { signal } : {}) },
+    isRouteResponse,
+  );
+}
+
+export async function rollbackRoute(
+  orgId: string,
+  routeId: string,
+  version: number,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RouteResponse> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/routes/${encodeURIComponent(routeId)}/rollback`,
+    { method: "POST", body: { version }, idempotencyKey, ...(signal ? { signal } : {}) },
+    isRouteResponse,
+  );
+}
+
+export async function getModelPolicy(orgId: string, signal?: AbortSignal): Promise<ModelPolicy> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/policy`,
+    signal ? { signal } : {},
+    isModelPolicy,
+  );
+}
+
+export async function updateProviderLifecycle(
+  orgId: string,
+  providerId: string,
+  input: { lifecycle: CatalogProvider["lifecycle"]; version: number },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<{ provider: CatalogProvider }> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/catalog/providers/${encodeURIComponent(providerId)}`,
+    { method: "PATCH", body: input, idempotencyKey, ...(signal ? { signal } : {}) },
+    (value): value is { provider: CatalogProvider } =>
+      isObject(value) && isCatalogProvider(value.provider),
+  );
+}
+
+export async function updateModelLifecycle(
+  orgId: string,
+  modelId: string,
+  input: { lifecycle: CatalogModel["lifecycle"]; version: number },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<{ model: CatalogModel }> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/catalog/models/${encodeURIComponent(modelId)}`,
+    { method: "PATCH", body: input, idempotencyKey, ...(signal ? { signal } : {}) },
+    (value): value is { model: CatalogModel } => isObject(value) && isCatalogModel(value.model),
+  );
+}
+
+export async function updateRouteLifecycle(
+  orgId: string,
+  routeId: string,
+  input: { lifecycle: Route["lifecycle"]; version: number },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<Route> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/routes/${encodeURIComponent(routeId)}`,
+    { method: "PATCH", body: input, idempotencyKey, ...(signal ? { signal } : {}) },
+    isRoute,
+  );
+}
+
+export async function updateModelPolicy(
+  orgId: string,
+  input: {
+    allowed_aliases: string[];
+    allowed_models: string[];
+    allowed_providers: string[];
+    credential_mode: ModelPolicy["credential_mode"];
+    managed_route_enabled: boolean;
+    version: number;
+  },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<ModelPolicy> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/policy`,
+    { method: "PUT", body: input, idempotencyKey, ...(signal ? { signal } : {}) },
+    isModelPolicy,
+  );
+}
+
+export async function listRouteHistory(
+  orgId: string,
+  routeId: string,
+  signal?: AbortSignal,
+): Promise<Page<RouteVersion>> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/routes/${encodeURIComponent(routeId)}/history`,
+    signal ? { signal } : {},
+    isRouteVersionPage,
+  );
+}
+
+export async function listUsage(orgId: string, signal?: AbortSignal): Promise<Page<UsageMetadata>> {
+  return requestJson(
+    `/api/v1/orgs/${encodeURIComponent(orgId)}/usage`,
+    signal ? { signal } : {},
+    isUsagePage,
+  );
+}
+
+export async function listInferenceModels(
+  orgId: string,
+  signal?: AbortSignal,
+): Promise<Page<ModelAliasView>> {
+  return requestJson(
+    "/api/v1/inference/models",
+    { headers: { "X-Org-ID": orgId }, ...(signal ? { signal } : {}) },
+    isModelAliasPage,
   );
 }
 
@@ -709,6 +1390,272 @@ function isSecurityEvent(value: unknown): value is SecurityEvent {
   );
 }
 
+function isModelCapability(value: unknown): value is ModelCapability {
+  return (
+    value === "text" ||
+    value === "vision" ||
+    value === "tools" ||
+    value === "structured_output" ||
+    value === "reasoning" ||
+    value === "audio" ||
+    value === "embeddings"
+  );
+}
+
+function isCatalogProvider(value: unknown): value is CatalogProvider {
+  return (
+    isObject(value) &&
+    typeof value.provider_id === "string" &&
+    typeof value.provider_key === "string" &&
+    typeof value.display_name === "string" &&
+    (value.adapter === "openai_compatible" ||
+      value.adapter === "anthropic" ||
+      value.adapter === "mock") &&
+    (value.lifecycle === "active" ||
+      value.lifecycle === "deprecated" ||
+      value.lifecycle === "disabled") &&
+    typeof value.version === "number" &&
+    (value.endpoint_id === null || typeof value.endpoint_id === "string") &&
+    (value.endpoint_url === undefined ||
+      value.endpoint_url === null ||
+      typeof value.endpoint_url === "string") &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isCatalogModel(value: unknown): value is CatalogModel {
+  return (
+    isObject(value) &&
+    typeof value.model_id === "string" &&
+    typeof value.provider_id === "string" &&
+    typeof value.provider_model_id === "string" &&
+    typeof value.display_name === "string" &&
+    Array.isArray(value.capabilities) &&
+    value.capabilities.every(isModelCapability) &&
+    (value.max_input_tokens === null || typeof value.max_input_tokens === "number") &&
+    (value.max_output_tokens === null || typeof value.max_output_tokens === "number") &&
+    (value.lifecycle === "active" ||
+      value.lifecycle === "deprecated" ||
+      value.lifecycle === "disabled") &&
+    (value.pricing_version === null || typeof value.pricing_version === "string") &&
+    typeof value.version === "number" &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isModelAlias(value: unknown): value is ModelAlias {
+  return (
+    isObject(value) &&
+    typeof value.alias_id === "string" &&
+    typeof value.alias === "string" &&
+    typeof value.display_name === "string" &&
+    (value.lifecycle === "active" ||
+      value.lifecycle === "deprecated" ||
+      value.lifecycle === "disabled") &&
+    (value.description === null || typeof value.description === "string") &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isProviderHealth(value: unknown): value is ProviderHealth {
+  return (
+    isObject(value) &&
+    typeof value.provider_id === "string" &&
+    (value.state === "ready" || value.state === "degraded" || value.state === "cooldown") &&
+    (value.cooldown_until === null || typeof value.cooldown_until === "string") &&
+    (value.last_error_code === null || typeof value.last_error_code === "string") &&
+    typeof value.success_count === "number" &&
+    typeof value.failure_count === "number" &&
+    typeof value.timeout_count === "number" &&
+    typeof value.rate_limit_count === "number" &&
+    typeof value.sample_count === "number" &&
+    typeof value.ttft_ms_total === "number" &&
+    typeof value.completion_latency_ms_total === "number" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isCatalogResponse(value: unknown): value is CatalogResponse {
+  return (
+    isObject(value) &&
+    typeof value.catalog_version === "string" &&
+    Array.isArray(value.providers) &&
+    value.providers.every(isCatalogProvider) &&
+    Array.isArray(value.models) &&
+    value.models.every(isCatalogModel) &&
+    Array.isArray(value.aliases) &&
+    value.aliases.every(isModelAlias) &&
+    Array.isArray(value.health) &&
+    value.health.every(isProviderHealth)
+  );
+}
+
+function isCredentialMetadata(value: unknown): value is CredentialMetadata {
+  return (
+    isObject(value) &&
+    typeof value.credential_id === "string" &&
+    (value.org_id === null || typeof value.org_id === "string") &&
+    ["platform", "organization", "user", "service_account", "local_only"].includes(
+      String(value.owner_type),
+    ) &&
+    (value.owner_user_id === null || typeof value.owner_user_id === "string") &&
+    typeof value.provider_id === "string" &&
+    typeof value.label === "string" &&
+    ["active", "rotating", "revoked"].includes(String(value.status)) &&
+    typeof value.version === "number" &&
+    typeof value.fingerprint === "string" &&
+    (value.key_version === null || typeof value.key_version === "string") &&
+    (value.parent_credential_id === null || typeof value.parent_credential_id === "string") &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string" &&
+    (value.last_used_at === null || typeof value.last_used_at === "string") &&
+    typeof value.has_secret === "boolean"
+  );
+}
+
+function isCredentialResponse(value: unknown): value is CredentialResponse {
+  return (
+    isObject(value) &&
+    isCredentialMetadata(value.credential) &&
+    typeof value.duplicate === "boolean"
+  );
+}
+
+function isRouteCandidate(value: unknown): value is RouteCandidate {
+  return (
+    isObject(value) &&
+    typeof value.provider_id === "string" &&
+    typeof value.model_id === "string" &&
+    typeof value.weight === "number" &&
+    typeof value.timeout_ms === "number" &&
+    typeof value.max_retries === "number" &&
+    (value.credential_id === null || typeof value.credential_id === "string")
+  );
+}
+
+function isRouteConfig(value: unknown): value is RouteConfig {
+  return (
+    isObject(value) &&
+    ["fixed", "ordered_fallback", "weighted_health_aware"].includes(String(value.strategy)) &&
+    Array.isArray(value.candidates) &&
+    value.candidates.every(isRouteCandidate)
+  );
+}
+
+function isRoute(value: unknown): value is Route {
+  return (
+    isObject(value) &&
+    typeof value.route_id === "string" &&
+    typeof value.org_id === "string" &&
+    typeof value.alias === "string" &&
+    typeof value.display_name === "string" &&
+    ["fixed", "ordered_fallback", "weighted_health_aware"].includes(String(value.strategy)) &&
+    ["draft", "published", "disabled"].includes(String(value.lifecycle)) &&
+    (value.active_version_id === null || typeof value.active_version_id === "string") &&
+    typeof value.version === "number" &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isRouteVersion(value: unknown): value is RouteVersion {
+  return (
+    isObject(value) &&
+    typeof value.route_version_id === "string" &&
+    typeof value.route_id === "string" &&
+    typeof value.version === "number" &&
+    isRouteConfig(value.config) &&
+    typeof value.config_hash === "string" &&
+    typeof value.created_by_user_id === "string" &&
+    typeof value.created_at === "string" &&
+    (value.published_at === null || typeof value.published_at === "string")
+  );
+}
+
+function isRouteResponse(value: unknown): value is RouteResponse {
+  return (
+    isObject(value) &&
+    isRoute(value.route) &&
+    (value.version === null || isRouteVersion(value.version)) &&
+    typeof value.duplicate === "boolean"
+  );
+}
+
+function isModelPolicy(value: unknown): value is ModelPolicy {
+  return (
+    isObject(value) &&
+    typeof value.org_id === "string" &&
+    typeof value.policy_version === "number" &&
+    (value.allowed_aliases === null ||
+      (Array.isArray(value.allowed_aliases) &&
+        value.allowed_aliases.every((item) => typeof item === "string"))) &&
+    (value.allowed_models === null ||
+      (Array.isArray(value.allowed_models) &&
+        value.allowed_models.every((item) => typeof item === "string"))) &&
+    (value.allowed_providers === null ||
+      (Array.isArray(value.allowed_providers) &&
+        value.allowed_providers.every((item) => typeof item === "string"))) &&
+    [
+      "platform_only",
+      "organization_only",
+      "user_allowed",
+      "platform_or_organization",
+      "local_direct",
+      "ordered_fallback",
+    ].includes(String(value.credential_mode)) &&
+    typeof value.managed_route_enabled === "boolean" &&
+    typeof value.version === "number" &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+function isUsageMetadata(value: unknown): value is UsageMetadata {
+  return (
+    isObject(value) &&
+    typeof value.usage_event_id === "string" &&
+    typeof value.request_id === "string" &&
+    typeof value.org_id === "string" &&
+    (value.project_id === null || typeof value.project_id === "string") &&
+    (value.run_id === null || typeof value.run_id === "string") &&
+    typeof value.principal_user_id === "string" &&
+    (value.session_id === null || typeof value.session_id === "string") &&
+    (value.device_id === null || typeof value.device_id === "string") &&
+    typeof value.model_alias === "string" &&
+    typeof value.route_version_id === "string" &&
+    typeof value.provider_id === "string" &&
+    typeof value.model_id === "string" &&
+    (value.input_tokens === null || typeof value.input_tokens === "number") &&
+    (value.output_tokens === null || typeof value.output_tokens === "number") &&
+    (value.cached_tokens === null || typeof value.cached_tokens === "number") &&
+    isObject(value.provider_usage) &&
+    (value.estimated_cost_minor === null || typeof value.estimated_cost_minor === "number") &&
+    (value.actual_cost_minor === null || typeof value.actual_cost_minor === "number") &&
+    (value.currency === null || typeof value.currency === "string") &&
+    (value.pricing_version === null || typeof value.pricing_version === "string") &&
+    typeof value.budget_decision === "string" &&
+    (value.ttft_ms === null || typeof value.ttft_ms === "number") &&
+    (value.total_latency_ms === null || typeof value.total_latency_ms === "number") &&
+    typeof value.created_at === "string"
+  );
+}
+
+function isModelAliasView(value: unknown): value is ModelAliasView {
+  return (
+    isObject(value) &&
+    typeof value.alias === "string" &&
+    typeof value.display_name === "string" &&
+    typeof value.lifecycle === "string" &&
+    (value.description === null || typeof value.description === "string") &&
+    (value.route_id === null || typeof value.route_id === "string") &&
+    (value.route_version_id === null || typeof value.route_version_id === "string") &&
+    typeof value.available === "boolean"
+  );
+}
+
 function isPage<T>(value: unknown, item: Decoder<T>): value is Page<T> {
   return (
     isObject(value) &&
@@ -779,6 +1726,59 @@ function isReauthResponse(value: unknown): value is ReauthResponse {
   );
 }
 
+function isCeremonyStartResponse(value: unknown): value is CeremonyStartResponse {
+  return (
+    isObject(value) &&
+    typeof value.ceremony_id === "string" &&
+    typeof value.expires_at === "string" &&
+    isObject(value.public_key)
+  );
+}
+
+function isPasskeySummary(value: unknown): value is PasskeySummary {
+  return (
+    isObject(value) &&
+    typeof value.passkey_id === "string" &&
+    typeof value.label === "string" &&
+    Array.isArray(value.transports) &&
+    (value.backup_eligible === null ||
+      value.backup_eligible === undefined ||
+      typeof value.backup_eligible === "boolean") &&
+    (value.backup_state === null ||
+      value.backup_state === undefined ||
+      typeof value.backup_state === "boolean") &&
+    typeof value.created_at === "string" &&
+    (value.last_used_at === null ||
+      value.last_used_at === undefined ||
+      typeof value.last_used_at === "string")
+  );
+}
+
+function isPasskeyListResponse(value: unknown): value is PasskeyListResponse {
+  return (
+    isObject(value) &&
+    Array.isArray(value.items) &&
+    value.items.every(isPasskeySummary) &&
+    typeof value.password_configured === "boolean"
+  );
+}
+
+function isPasswordStatusResponse(value: unknown): value is PasswordStatusResponse {
+  return isObject(value) && typeof value.configured === "boolean";
+}
+
+function isPasskeyIdResponse(value: unknown): value is { passkey_id: string } {
+  return isObject(value) && typeof value.passkey_id === "string";
+}
+
+function isPasskeyRenameResponse(value: unknown): value is { passkey_id: string; label: string } {
+  return isObject(value) && typeof value.passkey_id === "string" && typeof value.label === "string";
+}
+
+function isReauthGrantResponse(value: unknown): value is { grant: ReauthResponse } {
+  return isObject(value) && isObject(value.grant) && isReauthResponse(value.grant);
+}
+
 function isIdentityLinkResponse(value: unknown): value is IdentityLinkResponse {
   return (
     isObject(value) &&
@@ -788,6 +1788,22 @@ function isIdentityLinkResponse(value: unknown): value is IdentityLinkResponse {
     typeof value.identity.email === "string" &&
     typeof value.identity.email_verified === "boolean"
   );
+}
+
+function isCredentialPage(value: unknown): value is Page<CredentialMetadata> {
+  return isPage(value, isCredentialMetadata);
+}
+function isRoutePage(value: unknown): value is Page<Route> {
+  return isPage(value, isRoute);
+}
+function isRouteVersionPage(value: unknown): value is Page<RouteVersion> {
+  return isPage(value, isRouteVersion);
+}
+function isUsagePage(value: unknown): value is Page<UsageMetadata> {
+  return isPage(value, isUsageMetadata);
+}
+function isModelAliasPage(value: unknown): value is Page<ModelAliasView> {
+  return isPage(value, isModelAliasView);
 }
 
 function isOrganizationPage(value: unknown): value is Page<OrganizationSummary> {
@@ -859,13 +1875,14 @@ export interface WorkspaceBinding {
 }
 
 export interface PolicySnapshot {
-  policy_id: string;
+  policy_id: string | null;
   org_id: string;
   policy_version: number;
   issued_at: string;
   expires_at: string;
   signature: string | null;
   payload: Record<string, unknown>;
+  persisted: boolean;
 }
 
 function isManagedDevice(value: unknown): value is ManagedDevice {
@@ -922,12 +1939,14 @@ function isWorkspaceBindingList(value: unknown): value is { items: WorkspaceBind
 function isPolicySnapshot(value: unknown): value is PolicySnapshot {
   return (
     isObject(value) &&
-    typeof value.policy_id === "string" &&
+    (value.policy_id === null || typeof value.policy_id === "string") &&
     typeof value.org_id === "string" &&
     typeof value.policy_version === "number" &&
+    value.policy_version >= 0 &&
     typeof value.issued_at === "string" &&
     typeof value.expires_at === "string" &&
-    isObject(value.payload)
+    isObject(value.payload) &&
+    typeof value.persisted === "boolean"
   );
 }
 

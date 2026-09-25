@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 
 import {
+  listPasskeys,
   listSecurityEvents,
   listSessions,
+  passwordStatus,
   reauthenticate,
   revokeSession,
   type MeResponse,
+  type PasskeySummary,
   type SecurityEvent,
   type SessionSummary,
 } from "@/lib/api";
@@ -14,6 +17,8 @@ import { presentApiError } from "@/lib/errors";
 export function AccountPanel({ me }: { me: MeResponse }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [passkeys, setPasskeys] = useState<PasskeySummary[]>([]);
+  const [passwordConfigured, setPasswordConfigured] = useState<boolean | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -22,9 +27,17 @@ export function AccountPanel({ me }: { me: MeResponse }) {
     setBusy(true);
     setError(null);
     try {
-      const [sessionPage, eventPage] = await Promise.all([listSessions(), listSecurityEvents()]);
+      const [sessionPage, eventPage, passkeyPage, password] = await Promise.all([
+        listSessions(),
+        listSecurityEvents(),
+        listPasskeys().catch(() => null),
+        passwordStatus().catch(() => null),
+      ]);
       setSessions(sessionPage.items);
       setEvents(eventPage.items);
+      setPasskeys(passkeyPage?.items ?? []);
+      if (passkeyPage) setPasswordConfigured(passkeyPage.password_configured);
+      else if (password) setPasswordConfigured(password.configured);
     } catch (requestError) {
       setError(requestError);
     } finally {
@@ -103,7 +116,58 @@ export function AccountPanel({ me }: { me: MeResponse }) {
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <Info label="Email" value={me.user.email} />
           <Info label="Verification" value={me.user.email_verified ? "Verified" : "Pending"} />
+          <Info
+            label="Passkeys"
+            value={passkeys.length === 0 ? "None registered" : `${passkeys.length} registered`}
+          />
+          <Info
+            label="Password fallback"
+            value={
+              passwordConfigured === null
+                ? "Unknown"
+                : passwordConfigured
+                  ? "Configured"
+                  : "Not configured"
+            }
+          />
         </div>
+      </section>
+      <section className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
+        <div className="border-b border-[var(--border)] px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-[var(--civic-navy)]">Passkeys</h2>
+            <p className="mt-1 text-sm text-[var(--muted-strong)]">
+              Phishing-resistant sign-in. Removing the last sign-in method requires another passkey
+              or a configured password.
+            </p>
+          </div>
+        </div>
+        {passkeys.length === 0 ? (
+          <p className="p-5 text-sm text-[var(--muted)]">
+            No passkeys yet. Add one from a passkey-capable browser after completing a security
+            check.
+          </p>
+        ) : (
+          <ul className="divide-y divide-[var(--border)]">
+            {passkeys.map((passkey) => (
+              <li
+                key={passkey.passkey_id}
+                className="flex flex-col gap-1 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <p className="font-medium text-[var(--civic-navy)]">{passkey.label}</p>
+                  <p className="mt-1 text-xs tabular-nums text-[var(--muted)]">
+                    {new Date(passkey.created_at).toLocaleString()}
+                    {passkey.last_used_at
+                      ? ` · Last used ${new Date(passkey.last_used_at).toLocaleString()}`
+                      : ""}
+                  </p>
+                </div>
+                <span className="text-xs text-[var(--muted)]">{passkey.transports.join(", ")}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
       <section className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">

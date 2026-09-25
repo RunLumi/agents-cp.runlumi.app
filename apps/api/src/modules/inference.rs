@@ -46,6 +46,10 @@ pub struct InferenceRequest {
     pub max_output_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub tools: Vec<Value>,
+    /// Whether a pre-dispatch failure may safely be retried/fallbacked.
+    /// Tool-bearing requests are conservative until an adapter explicitly
+    /// proves the operation idempotent.
+    pub retry_safe: bool,
     pub project_id: Option<String>,
     pub session_id: Option<String>,
     pub run_id: Option<String>,
@@ -241,8 +245,11 @@ impl SseDecoder {
         if self.buffer.trim().is_empty() {
             return Vec::new();
         }
-        let bytes = self.buffer.as_bytes().to_vec();
+        let mut bytes = self.buffer.as_bytes().to_vec();
         self.buffer.clear();
+        if !bytes.ends_with(b"\n\n") {
+            bytes.extend_from_slice(b"\n\n");
+        }
         self.push(&bytes, state)
     }
 }
@@ -280,44 +287,43 @@ fn decode_openai_value(value: &Value, state: &mut AdapterStreamState) -> Vec<Pro
             },
         });
     }
-    let Some(choice) = value
+    if let Some(choice) = value
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
-    else {
-        return events;
-    };
-    if let Some(text) = choice
-        .get("delta")
-        .and_then(|delta| delta.get("content"))
-        .and_then(Value::as_str)
-        .filter(|text| !text.is_empty())
     {
-        events.push(ProviderStreamEvent::TextDelta {
-            text: text.to_owned(),
-        });
-    }
-    if let Some(tool_calls) = choice
-        .get("delta")
-        .and_then(|delta| delta.get("tool_calls"))
-        .and_then(Value::as_array)
-    {
-        for call in tool_calls {
-            let call_id = call
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("tool_call")
-                .to_owned();
-            let arguments_delta = call
-                .get("function")
-                .and_then(|function| function.get("arguments"))
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            events.push(ProviderStreamEvent::ToolCallDelta {
-                call_id,
-                arguments_delta,
+        if let Some(text) = choice
+            .get("delta")
+            .and_then(|delta| delta.get("content"))
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+        {
+            events.push(ProviderStreamEvent::TextDelta {
+                text: text.to_owned(),
             });
+        }
+        if let Some(tool_calls) = choice
+            .get("delta")
+            .and_then(|delta| delta.get("tool_calls"))
+            .and_then(Value::as_array)
+        {
+            for call in tool_calls {
+                let call_id = call
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool_call")
+                    .to_owned();
+                let arguments_delta = call
+                    .get("function")
+                    .and_then(|function| function.get("arguments"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                events.push(ProviderStreamEvent::ToolCallDelta {
+                    call_id,
+                    arguments_delta,
+                });
+            }
         }
     }
     if events.is_empty() {
@@ -419,6 +425,45 @@ mod tests {
             events.as_slice(),
             [ProviderStreamEvent::TextDelta { .. }]
         ));
+    }
+
+    #[test]
+    fn final_sse_event_without_blank_line_is_flushed_at_eof() {
+        let mut decoder = SseDecoder::new();
+        let mut state = AdapterStreamState::default();
+        assert!(
+            decoder
+                .push(
+                    b"data: {\"choices\":[{\"delta\":{\"content\":\"tail\"}}]}",
+                    &mut state
+                )
+                .is_empty()
+        );
+        let events = decoder.finish(&mut state);
+        assert!(events.iter().any(
+            |event| matches!(event, ProviderStreamEvent::TextDelta { text } if text == "tail")
+        ));
+    }
+
+    #[test]
+    fn provider_error_event_marks_stream_invalid_after_text() {
+        let mut decoder = SseDecoder::new();
+        let mut state = AdapterStreamState::default();
+        let events = decoder.push(
+            b"data: {\"id\":\"r\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\ndata: {\"error\":{\"code\":\"synthetic\"}}\n\n",
+            &mut state,
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ProviderStreamEvent::TextDelta { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ProviderStreamEvent::InvalidResponse))
+        );
+        assert!(state.invalid_response);
     }
 
     #[test]

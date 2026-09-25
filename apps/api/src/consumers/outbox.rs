@@ -12,39 +12,55 @@ use crate::{
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProductEventHandler;
 
+const SUPPORTED_EVENT_TYPES: &[&str] = &[
+    "foundation.check.requested.v1",
+    "identity.created.v1",
+    "identity.verified.v1",
+    "identity.linked.v1",
+    "identity.link_started.v1",
+    "auth.login.completed.v1",
+    "auth.logout.v1",
+    "auth.session.rotated.v1",
+    "organization.created.v1",
+    "organization.updated.v1",
+    "organization.ownership_transferred.v1",
+    "organization.suspended.v1",
+    "organization.resumed.v1",
+    "organization.deletion_started.v1",
+    "membership.invited.v1",
+    "membership.accepted.v1",
+    "membership.role_changed.v1",
+    "membership.removed.v1",
+    "membership.left.v1",
+    "membership.invitation_revoked.v1",
+    "membership.invitation_resent.v1",
+    "team.created.v1",
+    "team.member_removed.v1",
+    "session.revoked.v1",
+    "session.revoked_all.v1",
+    "reauthentication.granted.v1",
+    "device_code.approved.v1",
+    "model_policy.updated.v1",
+    "model_catalog.provider_created.v1",
+    "model_catalog.provider_lifecycle_changed.v1",
+    "model_catalog.model_created.v1",
+    "model_catalog.model_lifecycle_changed.v1",
+    "credential.created.v1",
+    "credential.rotated.v1",
+    "credential.revoked.v1",
+    "route.draft_created.v1",
+    "route.published.v1",
+    "route.rolled_back.v1",
+    "route.lifecycle_changed.v1",
+    "inference.requested.v1",
+    "inference.completed.v1",
+    "inference.failed.v1",
+    "usage.recorded.v1",
+];
+
 impl EventHandler for ProductEventHandler {
     async fn handle_once(&self, event: &EventEnvelope) -> Result<(), HandlerFailure> {
-        let event_type = event.event_type.as_str();
-        if matches!(
-            event_type,
-            "foundation.check.requested.v1"
-                | "identity.created.v1"
-                | "identity.verified.v1"
-                | "identity.linked.v1"
-                | "identity.link_started.v1"
-                | "auth.login.completed.v1"
-                | "auth.logout.v1"
-                | "auth.session.rotated.v1"
-                | "organization.created.v1"
-                | "organization.updated.v1"
-                | "organization.ownership_transferred.v1"
-                | "organization.suspended.v1"
-                | "organization.resumed.v1"
-                | "organization.deletion_started.v1"
-                | "membership.invited.v1"
-                | "membership.accepted.v1"
-                | "membership.role_changed.v1"
-                | "membership.removed.v1"
-                | "membership.left.v1"
-                | "membership.invitation_revoked.v1"
-                | "membership.invitation_resent.v1"
-                | "team.created.v1"
-                | "team.member_removed.v1"
-                | "session.revoked.v1"
-                | "session.revoked_all.v1"
-                | "reauthentication.granted.v1"
-                | "device_code.approved.v1"
-        ) {
+        if SUPPORTED_EVENT_TYPES.contains(&event.event_type.as_str()) {
             Ok(())
         } else {
             Err(HandlerFailure::permanent(
@@ -68,4 +84,33 @@ where
 {
     let handler = ProductEventHandler;
     consume_queue_batch(batch, store, &handler, now, retry_policy, dead_letter_queue).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SUPPORTED_EVENT_TYPES;
+
+    #[test]
+    fn p04_event_registry_covers_every_emitted_event() {
+        for event in [
+            "model_policy.updated.v1",
+            "model_catalog.provider_created.v1",
+            "model_catalog.provider_lifecycle_changed.v1",
+            "model_catalog.model_created.v1",
+            "model_catalog.model_lifecycle_changed.v1",
+            "credential.created.v1",
+            "credential.rotated.v1",
+            "credential.revoked.v1",
+            "route.draft_created.v1",
+            "route.published.v1",
+            "route.rolled_back.v1",
+            "route.lifecycle_changed.v1",
+            "inference.requested.v1",
+            "inference.completed.v1",
+            "inference.failed.v1",
+            "usage.recorded.v1",
+        ] {
+            assert!(SUPPORTED_EVENT_TYPES.contains(&event), "missing {event}");
+        }
+    }
 }

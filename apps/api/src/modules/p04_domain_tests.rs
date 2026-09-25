@@ -27,6 +27,7 @@ fn catalog_capabilities_and_lifecycle_gate_new_routes() {
     assert!(capabilities.contains(ModelCapability::Tools));
     assert!(!capabilities.contains(ModelCapability::Audio));
     assert!(CatalogLifecycle::Active.allows_new_routes());
+    assert!(!CatalogLifecycle::Deprecated.allows_new_routes());
     assert!(!CatalogLifecycle::Disabled.allows_new_routes());
 }
 
@@ -41,6 +42,31 @@ fn explicit_policy_lists_are_allowlists_and_missing_entries_are_denied() {
     assert!(!policy.allows_alias("coding-fast"));
     assert!(policy.allows_model(&id("mdl", 1)));
     assert!(!policy.allows_model(&id("mdl", 2)));
+    let restricted = CatalogPolicy {
+        allowed_models: Some(BTreeSet::from([id("mdl", 2)])),
+        ..CatalogPolicy::default()
+    };
+    let config = route_config();
+    let models = vec![
+        model(&id("mdl", 1), &[ModelCapability::Text]),
+        model(&id("mdl", 2), &[ModelCapability::Text]),
+    ];
+    let providers = vec![
+        provider(&id("prv", 1), CatalogLifecycle::Active),
+        provider(&id("prv", 2), CatalogLifecycle::Active),
+    ];
+    let selected = select_candidates(
+        &config,
+        &models,
+        &providers,
+        &restricted,
+        &[],
+        &["text".to_owned()],
+        1,
+    )
+    .unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].model_id, id("mdl", 2));
 }
 
 #[test]
@@ -210,6 +236,66 @@ fn weighted_selection_is_deterministic_for_the_same_seed() {
 }
 
 #[test]
+fn fixed_strategy_selects_one_candidate() {
+    let mut config = route_config();
+    config.strategy = RouteStrategy::Fixed;
+    let models = vec![
+        model(&id("mdl", 1), &[ModelCapability::Text]),
+        model(&id("mdl", 2), &[ModelCapability::Text]),
+    ];
+    let providers = vec![
+        provider(&id("prv", 1), CatalogLifecycle::Active),
+        provider(&id("prv", 2), CatalogLifecycle::Active),
+    ];
+    let selected = select_candidates(
+        &config,
+        &models,
+        &providers,
+        &CatalogPolicy::default(),
+        &[],
+        &["text".to_owned()],
+        7,
+    )
+    .unwrap();
+    assert_eq!(selected.len(), 1);
+}
+
+#[test]
+fn weighted_strategy_uses_seed_for_primary_selection() {
+    let mut config = route_config();
+    config.strategy = RouteStrategy::WeightedHealthAware;
+    let models = vec![
+        model(&id("mdl", 1), &[ModelCapability::Text]),
+        model(&id("mdl", 2), &[ModelCapability::Text]),
+    ];
+    let providers = vec![
+        provider(&id("prv", 1), CatalogLifecycle::Active),
+        provider(&id("prv", 2), CatalogLifecycle::Active),
+    ];
+    let first = select_candidates(
+        &config,
+        &models,
+        &providers,
+        &CatalogPolicy::default(),
+        &[],
+        &["text".to_owned()],
+        1,
+    )
+    .unwrap();
+    let second = select_candidates(
+        &config,
+        &models,
+        &providers,
+        &CatalogPolicy::default(),
+        &[],
+        &["text".to_owned()],
+        2,
+    )
+    .unwrap();
+    assert_eq!(first[0].model_id, second[0].model_id);
+}
+
+#[test]
 fn selector_rejects_unsafe_or_empty_route_configs() {
     let mut config = route_config();
     config.candidates.clear();
@@ -227,6 +313,7 @@ fn request() -> InferenceRequest {
         max_output_tokens: Some(32),
         temperature: Some(0.2),
         tools: Vec::new(),
+        retry_safe: true,
         project_id: None,
         session_id: None,
         run_id: None,

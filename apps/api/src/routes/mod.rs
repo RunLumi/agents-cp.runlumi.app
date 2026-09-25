@@ -1,11 +1,14 @@
 pub mod account;
+pub mod ai_catalog;
 pub mod auth;
+pub mod authenticators;
 pub mod authorization;
 pub mod device_auth;
 pub mod devices;
 pub mod errors;
 pub mod foundation_checks;
 pub mod health;
+pub mod inference;
 pub mod meta;
 pub mod organizations;
 pub mod projects;

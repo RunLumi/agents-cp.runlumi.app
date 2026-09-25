@@ -9,6 +9,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use worker::d1::D1PreparedStatement;
 
 use crate::{
     adapters::{add_seconds, deliver_auth_code, new_resource_id, new_secret, sha256_hex},
@@ -768,7 +769,34 @@ pub async fn me(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn create_session(
+pub(crate) async fn create_session(
+    state: &Arc<AppState>,
+    context: &RequestContext,
+    database: &crate::adapters::d1::D1Adapter,
+    repository: &IdentityRepository<'_>,
+    user: &UserRecord,
+    headers: &HeaderMap,
+    action: &str,
+    previous_session_id: Option<&str>,
+) -> Result<(Response<Body>, String, String), ApiError> {
+    create_session_with_statements(
+        state,
+        context,
+        database,
+        repository,
+        user,
+        headers,
+        action,
+        previous_session_id,
+        Vec::new(),
+    )
+    .await
+}
+
+/// Create the canonical LoginSession while allowing an authenticator route
+/// to include its credential/ceremony mutations in the same D1 transaction.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn create_session_with_statements(
     _state: &Arc<AppState>,
     context: &RequestContext,
     database: &crate::adapters::d1::D1Adapter,
@@ -777,6 +805,7 @@ async fn create_session(
     headers: &HeaderMap,
     action: &str,
     previous_session_id: Option<&str>,
+    extra_statements: Vec<D1PreparedStatement>,
 ) -> Result<(Response<Body>, String, String), ApiError> {
     let session_id = generated_id("ses");
     let session_token = new_secret();
@@ -839,7 +868,8 @@ async fn create_session(
         action,
         &json!({ "scope": "web" }),
     )?;
-    let mut statements = vec![statement, security_statement, outbox];
+    let mut statements = extra_statements;
+    statements.extend([statement, security_statement, outbox]);
     if let Some(previous_session_id) = previous_session_id {
         statements.push(
             repository
@@ -937,7 +967,7 @@ fn authentication_error(context: &RequestContext, reason: &str, message: &str) -
     )
 }
 
-async fn enforce_rate_limit(
+pub(crate) async fn enforce_rate_limit(
     state: &Arc<AppState>,
     context: &RequestContext,
     bucket: &str,
