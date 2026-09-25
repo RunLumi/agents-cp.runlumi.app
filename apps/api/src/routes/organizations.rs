@@ -1339,23 +1339,40 @@ async fn transition_lifecycle_with_access(
         ));
     }
     let organizations = OrganizationRepository::new(database);
-    if !organizations
-        .update_state(
-            &org_id,
-            expected_state,
-            next_state,
-            body.version,
-            &context.received_at,
-        )
-        .await
-        .map_err(|error| database_error(&context, error))?
-    {
-        return Err(domain_error(
-            &context,
-            ApiErrorCode::Conflict,
-            "version_conflict",
-            "The organization lifecycle changed. Refresh and try again.",
-        ));
+    // P06-CR-003: the lifecycle move and the P06 `DeletionJob` link commit in
+    // the SAME batch. Executing the state change first would let an
+    // organization become `pending_deletion` with no job to do the work — a
+    // stall no retry can clear, because the lifecycle row is already past the
+    // transition. The job's UNIQUE lifecycle key makes a repeated request
+    // converge on the same job rather than forking a second one.
+    let mut statements = vec![
+        organizations
+            .update_state_statement(
+                &org_id,
+                expected_state,
+                next_state,
+                body.version,
+                &context.received_at,
+            )
+            .map_err(|error| database_error(&context, error))?,
+    ];
+    if next_state == "pending_deletion" {
+        let deletion_id = generated_id("del");
+        statements.push(
+            crate::repositories::DataGovernanceRepository::new(database)
+                .link_organization_deletion_job_statement(
+                    &crate::repositories::DeletionJobLinkInput {
+                        deletion_id: deletion_id.as_str(),
+                        org_id: &org_id,
+                        lifecycle_request_id: context.request_id.as_str(),
+                        cutoff_at: context.received_at.as_str(),
+                        legal_hold: false,
+                        requested_by_principal_id: access.principal.user_id.as_str(),
+                        now: &context.received_at,
+                    },
+                )
+                .map_err(|error| database_error(&context, error))?,
+        );
     }
     let event_id = generated_id("sec");
     let security_statement = security_statement(
@@ -1377,10 +1394,23 @@ async fn transition_lifecycle_with_access(
         action,
         &json!({ "state": next_state }),
     )?;
-    database
-        .batch(vec![security_statement, outbox])
+    statements.push(security_statement);
+    statements.push(outbox);
+    let results = database
+        .batch(statements)
         .await
         .map_err(|error| database_error(&context, error))?;
+    // A zero-row first statement is the optimistic version guard losing the
+    // race, not a store outage, so it maps to `version_conflict` rather than a
+    // 503. The batch rolled back, so no job was linked either.
+    if crate::adapters::d1::D1Adapter::changes(&results[0]).unwrap_or(1) != 1 {
+        return Err(domain_error(
+            &context,
+            ApiErrorCode::Conflict,
+            "version_conflict",
+            "The organization lifecycle changed. Refresh and try again.",
+        ));
+    }
     let organization = organizations
         .find_organization(&org_id)
         .await

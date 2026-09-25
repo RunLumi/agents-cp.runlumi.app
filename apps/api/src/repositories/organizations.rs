@@ -668,6 +668,35 @@ impl<'a> OrganizationRepository<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Build the lifecycle transition as a statement instead of executing it.
+    ///
+    /// P06-CR-003: moving an organization to `pending_deletion` and creating
+    /// its P06 `DeletionJob` must be ONE fact. Executing the state change
+    /// separately from the job link would let an organization be fenced with no
+    /// job to do the work — a permanent stall that no retry can clear, because
+    /// the lifecycle row is already past the transition. Callers that can pair
+    /// the two use this; `update_state` remains for the paths that have nothing
+    /// to pair it with.
+    pub fn update_state_statement(
+        &self,
+        org_id: &str,
+        expected_state: &str,
+        next_state: &str,
+        expected_version: i64,
+        now: &Timestamp,
+    ) -> worker::Result<D1PreparedStatement> {
+        self.database.prepare(
+            UPDATE_ORG_STATE_SQL,
+            &[
+                BindValue::Text(org_id),
+                BindValue::Text(next_state),
+                BindValue::Text(now.as_str()),
+                BindValue::Text(expected_state),
+                BindValue::Integer(expected_version as i32),
+            ],
+        )
+    }
+
     pub async fn update_state(
         &self,
         org_id: &str,

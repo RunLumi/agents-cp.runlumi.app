@@ -28,6 +28,11 @@ pub(crate) struct AppState {
     pub(crate) email: Option<SendEmail>,
     pub(crate) email_from: Option<String>,
     pub(crate) credential_key: Option<String>,
+    /// P06 license signing key, in `key_id:base64_pkcs8_der` form. A Wrangler
+    /// SECRET, never a var and never request input. Absent means no signed
+    /// license snapshot can be issued, which is reported as a stable reason
+    /// rather than as a permissive unsigned claim.
+    pub(crate) license_signing_secret: Option<String>,
     pub(crate) provider_allowlist: Vec<String>,
     pub(crate) allow_local_provider_endpoints: bool,
     pub(crate) webauthn: Option<WebAuthnAdapter>,
@@ -112,6 +117,13 @@ pub fn router(env: Env) -> Router {
         email: env.send_email("EMAIL").ok(),
         email_from: env.var("EMAIL_FROM").ok().map(|value| value.to_string()),
         credential_key,
+        // A Wrangler secret, read once at Worker construction. It is never
+        // logged and never echoed into a response; only the derived signature
+        // and its key id leave this module.
+        license_signing_secret: env
+            .var("LICENSE_SIGNING_SECRET")
+            .ok()
+            .map(|v| v.to_string()),
         provider_allowlist,
         allow_local_provider_endpoints,
         webauthn,

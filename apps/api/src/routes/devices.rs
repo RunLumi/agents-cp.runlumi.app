@@ -930,6 +930,31 @@ pub async fn fetch_policy(
                 "No policy snapshot exists for this organization yet.",
             )
         })?;
+    // P06-CR-002: the license block is EMBEDDED here rather than served from a
+    // second endpoint. `/devices/policy` is the single device license authority,
+    // so a device that can read policy can read its license, and there is no
+    // second path that could drift or be authorized differently.
+    //
+    // The signing key is a Wrangler secret, never a binding value from the
+    // request. When it is absent the block reports an explicit stable reason
+    // instead of issuing unsigned claims, so a misconfigured environment fails
+    // closed on paid inference rather than silently granting it.
+    // A malformed or absent key is a configuration error, not a permissive
+    // fallback: it yields `None` here and the license block reports a stable
+    // reason instead of issuing unsigned claims.
+    let signing_secret = state.license_signing_secret.as_deref().and_then(|raw| {
+        crate::adapters::billing::signing::LicenseSigningSecret::from_env_value(raw).ok()
+    });
+    let license = crate::routes::billing::compile_device_license_block(
+        database,
+        &context,
+        &device.org_id,
+        device.device_id.as_str(),
+        snapshot.policy_version,
+        signing_secret.as_ref(),
+    )
+    .await;
+
     Ok((
         StatusCode::OK,
         Json(json!({
@@ -941,6 +966,7 @@ pub async fn fetch_policy(
             "signature": Value::Null,
             "payload": serde_json::from_str::<Value>(&snapshot.payload)
                 .unwrap_or_else(|_| json!({})),
+            "license": license,
         })),
     )
         .into_response())
