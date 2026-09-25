@@ -10,8 +10,8 @@ Last initialized: 2026-09-24
 - Current implementation phases: **P04 in progress; P03 ready in parallel**
 - Next implementable phase: **P03**; P05 waits for both P03 and P04 Integration Gates
 - Current Contract Gates: **P02-CG `p02-cg-v2` (v1 at `ba35fb6`; CR-001 `0290e68`; passkey-first CR-002 `1972339`); P04-CG `p04-cg-v1` (freeze commit pending coordinator commit)**
-- Shared-file owner: **P04 coordinator for P04; P03 coordinator when assigned for P03**
-- Integration owner: **P04 coordinator for P04; P03 coordinator when assigned for P03**
+- Shared-file owner: **P04 coordinator for P04; P03 coordinator (assigned) for P03**
+- Integration owner: **P04 coordinator for P04; P03 coordinator (assigned) for P03**
 
 ## Phase status
 
@@ -20,7 +20,7 @@ Last initialized: 2026-09-24
 | P00 | active | n/a | n/a | execution mechanics operationalized |
 | P01 | complete | merged: `7835fd9` (PR #4) | PASS: `docs/implementation/gates/P01-IG.md` | PR #5 merged as `ced9635`; hosted check/build and local vertical slice passed |
 | P02 | complete | frozen: `ba35fb6`; CR-001: `0290e68` | PASS: `docs/implementation/gates/P02-IG.md` | Real local identity/org/member/authz/audit slice and hostile smoke pass; browser capture follow-up documented |
-| P03 | ready | ready to open | not started | P02 principal/org/authz/device handoff stable |
+| P03 | in_progress | frozen: `p03-cg-v1` (PR #9, `7952bd7`; +P03-CR-001) | not started | MOD/BE shipped (PR #11, CI green); FE/QA/Integration Gate pending |
 | P04 | in_progress | frozen: `p04-cg-v1` (pending gate commit) | not started | P04 catalog, credentials, routing, inference, usage slice in progress |
 | P05 | blocked | blocked | blocked | waits for P03 + P04 |
 | P06 | blocked | blocked | blocked | waits for P05 |
