@@ -708,7 +708,13 @@ impl std::str::FromStr for TimezoneId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FieldSpec {
     min: u32,
+    /// The highest accepted literal.
     max: u32,
+    /// `Some(target)` when `max` is only an accepted alias for `target`. Cron
+    /// day-of-week `7` is an alias for Sunday `0`, so it must be folded before
+    /// the field's effective range is computed — otherwise a `*` day-of-week
+    /// field can never be recognized as covering its whole range.
+    fold_max: Option<u32>,
     names: &'static [(&'static str, u32)],
 }
 
@@ -740,26 +746,31 @@ const DOW_NAMES: &[(&str, u32)] = &[
 const MINUTE_SPEC: FieldSpec = FieldSpec {
     min: 0,
     max: 59,
+    fold_max: None,
     names: &[],
 };
 const HOUR_SPEC: FieldSpec = FieldSpec {
     min: 0,
     max: 23,
+    fold_max: None,
     names: &[],
 };
 const DOM_SPEC: FieldSpec = FieldSpec {
     min: 1,
     max: 31,
+    fold_max: None,
     names: &[],
 };
 const MONTH_SPEC: FieldSpec = FieldSpec {
     min: 1,
     max: 12,
+    fold_max: None,
     names: MONTH_NAMES,
 };
 const DOW_SPEC: FieldSpec = FieldSpec {
     min: 0,
     max: 7,
+    fold_max: Some(0),
     names: DOW_NAMES,
 };
 
@@ -768,26 +779,32 @@ const DOW_SPEC: FieldSpec = FieldSpec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Field {
     mask: u64,
+    min: u32,
+    /// The highest *representable* value, after any alias has been folded away.
     max: u32,
 }
 
 impl Field {
-    fn full(spec: FieldSpec) -> Self {
-        let span = u64::from(spec.max - spec.min + 1);
-        Self {
-            mask: if span >= 64 {
-                u64::MAX
-            } else {
-                (1 << span) - 1
-            },
-            max: spec.max,
-        }
-    }
-
     fn empty(spec: FieldSpec) -> Self {
         Self {
             mask: 0,
-            max: spec.max,
+            min: spec.min,
+            // An aliased maximum is not a distinct value, so the representable
+            // range ends one below it. For day-of-week that is 0–6, because `7`
+            // is only another spelling of Sunday.
+            max: if spec.fold_max.is_some() {
+                spec.max - 1
+            } else {
+                spec.max
+            },
+        }
+    }
+
+    /// Fold an accepted alias onto the value it names.
+    fn normalize(spec: FieldSpec, value: u32) -> u32 {
+        match spec.fold_max {
+            Some(target) if value == spec.max => target,
+            _ => value,
         }
     }
 
@@ -795,40 +812,45 @@ impl Field {
         if !(spec.min..=spec.max).contains(&value) {
             return Err(DomainError::ScheduleInvalid);
         }
-        // Day-of-week 7 is an accepted spelling of Sunday and folds into 0.
-        let normalized = if spec.max == DOW_SPEC.max && value == 7 {
-            0
-        } else {
-            value
-        };
-        self.mask |= 1 << (normalized - spec.min);
+        self.mask |= 1 << (Self::normalize(spec, value) - self.min);
         Ok(())
     }
 
-    /// True when this field covers its entire spec range, which is how a
-    /// canonical `*` is recognized. Used by DOM/DOW `or` semantics: a `*` day
-    /// field must not force the other field to be ignored.
-    fn is_full(&self, spec: FieldSpec) -> bool {
-        self.max == spec.max && self.mask == Self::full(spec).mask
+    /// True when this field covers its entire representable range, which is how
+    /// an unrestricted day field is recognized.
+    ///
+    /// This is deliberately a *semantic* test on a range computed *after*
+    /// folding. The day-of-month/day-of-week `or` mode has to know whether a day
+    /// field constrains anything at all, and the classic way to get that wrong is
+    /// to compare against a mask built over the un-folded `0..=7` literal range:
+    /// day-of-week `7` never lands in the mask, so a `*` day-of-week field looks
+    /// restricted, the `or` rule silently degrades to `dom || dow`, and `dow` is
+    /// then unconditionally true — which makes a monthly automation such as
+    /// `0 9 15 * *` fire *every day*. Both `*` and `0-6` mean "every day" here,
+    /// which is what an operator writing either one intends, and a genuinely
+    /// partial field such as `1-5` or `15` is still restricted and still OR-s,
+    /// which is standard cron behavior.
+    fn is_full(&self) -> bool {
+        let span = u64::from(self.max - self.min + 1);
+        self.mask
+            == if span >= 64 {
+                u64::MAX
+            } else {
+                (1 << span) - 1
+            }
     }
 
     /// Test membership using the SAME bit index that [`Field::insert`] wrote.
     ///
-    /// `insert` stores `value` at bit `value - spec.min`, so `matches` must read
-    /// `value - spec.min` too. A hard-coded `value - 1` silently misreads every
+    /// `insert` stores `value` at bit `value - min`, so `matches` must read
+    /// `value - min` too. A hard-coded `value - 1` silently misreads every
     /// field whose `min` is not 1 (minutes and hours are 0-based), which would
     /// shift a canonical `0 9 * * 1-5` into a different firing time.
     fn matches(&self, spec: FieldSpec, value: u32) -> bool {
         if !(spec.min..=spec.max).contains(&value) {
             return false;
         }
-        // Day-of-week 7 folds into 0, matching `insert`.
-        let normalized = if spec.max == DOW_SPEC.max && value == 7 {
-            0
-        } else {
-            value
-        };
-        let index = normalized - spec.min;
+        let index = Self::normalize(spec, value) - self.min;
         index < 64 && (self.mask & (1 << index)) != 0
     }
 }
@@ -911,8 +933,8 @@ impl CronExpression {
         match self.dom_dow_mode {
             DomDowMode::And => dom_hit && dow_hit,
             DomDowMode::Or => {
-                let dom_full = self.days_of_month.is_full(DOM_SPEC);
-                let dow_full = self.days_of_week.is_full(DOW_SPEC);
+                let dom_full = self.days_of_month.is_full();
+                let dow_full = self.days_of_week.is_full();
                 match (dom_full, dow_full) {
                     (true, true) => true,
                     (true, false) => dow_hit,
@@ -1017,7 +1039,7 @@ fn parse_value(text: &str, spec: FieldSpec) -> Result<u32, DomainError> {
 }
 
 fn render_field(field: &Field, spec: FieldSpec) -> String {
-    if field.is_full(spec) {
+    if field.is_full() {
         return "*".to_owned();
     }
     let mut rendered = Vec::new();
@@ -1828,7 +1850,11 @@ pub fn missed_run_plan(
     let mut truncated_by_budget = false;
 
     loop {
-        let batch = generate(rule, zone, cursor, keep.max(1), &mut budget)?;
+        // The generation batch size is deliberately independent of how many slots
+        // the policy keeps. A one-at-a-time batch re-enters the generator once per
+        // missed slot — ten thousand calls for a one-minute rule over a
+        // seven-day window — which is the same answer far more expensively.
+        let batch = generate(rule, zone, cursor, MAX_NEXT_INSTANTS, &mut budget)?;
         let Some(last) = batch.last().copied() else {
             break;
         };
@@ -1860,7 +1886,15 @@ pub fn missed_run_plan(
         }
     }
 
-    if due_slots > due_ring.len() {
+    // `skip` produces no occurrence at all. Without dropping the ring here it
+    // would still hand back one slot, making `skip` indistinguishable from
+    // `run_once` and replaying work for exactly the organizations that
+    // configured `skip` to avoid a reconnect burst. DST skips are kept: those are
+    // decisions about a slot that does exist, not an outage artifact, and the
+    // frozen contract requires the stable reason to be recorded.
+    if rule.missed_policy() == MissedPolicy::Skip {
+        due_ring.clear();
+    } else if due_slots > due_ring.len() {
         truncated = true;
     }
     if truncated_by_budget {

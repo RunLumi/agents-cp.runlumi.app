@@ -14,6 +14,11 @@ pub enum BindValue<'a> {
     /// 64-bit integer bound as a JS number; exact for values below 2^53
     /// (counters and policy versions stay far below that bound).
     Int64(i64),
+    /// Raw bytes for a `BLOB` column. P06 stores the exact serialized webhook
+    /// body and AES-GCM ciphertext/nonce this way, so a byte-for-byte round trip
+    /// is preserved and the signature over the stored body stays verifiable.
+    /// Base64 or another lossy text encoding is NOT an acceptable substitute.
+    Blob(&'a [u8]),
     Null,
 }
 
@@ -39,6 +44,15 @@ impl D1Adapter {
                 BindValue::Text(value) => JsValue::from_str(value),
                 BindValue::Integer(value) => JsValue::from_f64(f64::from(*value)),
                 BindValue::Int64(value) => JsValue::from_f64(*value as f64),
+                // Bind bytes through a Uint8Array so D1 stores a real BLOB
+                // rather than a lossy text encoding. The array is a copy, so
+                // the slice does not need to outlive this call. The iterator
+                // yields `&BindValue`, so the slice itself needs one more deref.
+                BindValue::Blob(value) => {
+                    let bytes = worker::js_sys::Uint8Array::new_with_length(value.len() as u32);
+                    bytes.copy_from(value);
+                    bytes.into()
+                }
                 BindValue::Null => JsValue::NULL,
             })
             .collect::<Vec<_>>();

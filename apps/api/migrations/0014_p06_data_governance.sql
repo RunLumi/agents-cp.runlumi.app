@@ -160,13 +160,18 @@ CREATE INDEX idx_export_jobs_user_history
     ON export_jobs(scope_user_id, requested_at DESC) WHERE scope_type = 'user';
 CREATE INDEX idx_export_jobs_due
     ON export_jobs(state, next_attempt_at) WHERE state IN ('queued', 'retry_wait');
--- Only `ready` may have an artifact pointer.
-CREATE TRIGGER trg_export_jobs_artifact_only_when_ready
-BEFORE UPDATE OF state ON export_jobs
-FOR EACH ROW WHEN NEW.state <> 'ready'
-BEGIN
-    SELECT RAISE(ABORT, 'export artifact only in ready state');
-END;
+-- The export lifecycle itself is NOT guarded here. The frozen state machine
+-- requires `ready → expired`, so any trigger that blocks a transition out of
+-- `ready` would make an export job unable to finish.
+--
+-- The real invariant is "no artifact while not ready". Enforcing it on the
+-- artifact INSERT is both correct and sufficient: an artifact simply cannot
+-- come into existence unless its job is already `ready`, so there is nothing to
+-- advertise for `requested`, `queued`, `collecting`, `packaging`, `verifying`,
+-- `retry_wait`, `failed`, or `cancelled`. The complementary READ-side check —
+-- a download is served only while the job is `ready`, the artifact is
+-- un-expired, and its grant is unexpired — is enforced by the download handler,
+-- which re-authorizes the principal and the job scope on every use.
 
 --------------------------------------------------------------------------------
 -- Export artifact metadata (private R2; D1 holds metadata only)
@@ -189,6 +194,20 @@ CREATE TABLE export_artifacts (
 );
 CREATE INDEX idx_export_artifacts_expiry
     ON export_artifacts(expires_at) WHERE deleted_at IS NULL;
+
+-- F20 / the frozen export contract: an artifact may only be created while its
+-- job is `ready`. This is the write-side half of "no artifact while not ready";
+-- see the note above `export_jobs` for why the guard lives here rather than on
+-- the job's state machine, which must be able to reach `expired`.
+CREATE TRIGGER trg_export_artifacts_only_while_ready
+BEFORE INSERT ON export_artifacts
+FOR EACH ROW WHEN NOT EXISTS (
+    SELECT 1 FROM export_jobs
+    WHERE export_id = NEW.export_id AND state = 'ready'
+)
+BEGIN
+    SELECT RAISE(ABORT, 'export artifact may only be created while the job is ready');
+END;
 
 -- Re-authorized, short-lived download grants. The grant is bound to the job
 -- scope and expiry and is rechecked against current authorization on every use.

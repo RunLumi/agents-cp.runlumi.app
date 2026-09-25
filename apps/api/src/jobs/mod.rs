@@ -1,3 +1,4 @@
+pub mod automations;
 mod retry_sweep;
 mod time;
 

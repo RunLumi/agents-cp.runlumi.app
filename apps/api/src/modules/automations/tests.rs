@@ -820,3 +820,25 @@ fn every_domain_error_maps_to_a_frozen_stable_code() {
         );
     }
 }
+
+#[test]
+fn probe_missed_run_never_returns_a_future_slot() {
+    let rule = cron_rule("0 * * * *", DstPolicy::SkipDuplicate, MissedPolicy::RunOnce).unwrap();
+    let plan = missed_run_plan(
+        &rule,
+        &utc(),
+        parse_instant_utc("2026-09-25T00:00:00.000Z").unwrap(),
+        parse_instant_utc("2026-09-25T06:30:00.000Z").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        plan.due_instants().len(),
+        1,
+        "run_once coalesces to one slot"
+    );
+    assert_eq!(
+        plan.due_instants()[0],
+        parse_instant_utc("2026-09-25T06:00:00.000Z").unwrap(),
+        "the coalesced slot must be the most recent MISSED one"
+    );
+}

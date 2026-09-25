@@ -7,7 +7,10 @@
 mod ai;
 mod audit;
 mod authenticators;
+mod automations;
+pub mod billing;
 mod budgets;
+pub mod data_governance;
 mod device;
 mod devices;
 mod idempotency;
@@ -20,6 +23,7 @@ mod runs;
 mod security;
 mod tools;
 mod usage;
+mod webhooks;
 
 pub use ai::{
     AiRepository, AliasRecord, CredentialRecord, HealthRecord, InferenceRequestRecord, ModelRecord,
@@ -29,7 +33,10 @@ pub use audit::*;
 pub use authenticators::{
     AuthenticatorRepository, CeremonyRecord, PasskeyRecord, PasswordRecord, RecoveryRecord,
 };
+pub use automations::*;
+pub use billing::*;
 pub use budgets::*;
+pub use data_governance::*;
 pub use device::{DeviceAuthorizationRecord, DeviceAuthorizationRepository};
 pub use devices::{
     DeviceEnrollmentInput, DeviceEnrollmentRecord, DeviceRecord, DeviceRepository,
@@ -53,3 +60,4 @@ pub use runs::*;
 pub use security::{SecurityEventInput, SecurityEventRecord, SecurityEventRepository};
 pub use tools::*;
 pub use usage::*;
+pub use webhooks::*;

@@ -147,14 +147,23 @@ CREATE INDEX idx_webhook_deliveries_endpoint_history
     ON webhook_deliveries(endpoint_id, created_at DESC);
 CREATE INDEX idx_webhook_deliveries_org_state ON webhook_deliveries(org_id, state, created_at DESC);
 -- Recursive-delivery guard: delivery/endpoint/notification-delivery events are
--- never fanned out to the same webhook endpoint.
+-- never fanned out to the same webhook endpoint. This is EXACTLY the frozen
+-- gate's list: `webhook.delivery_*`, `webhook.endpoint_*`, and the
+-- notification-delivery family.
+--
+-- `webhook.test.v1` is deliberately NOT in this list. The gate requires a test
+-- delivery to run "through the same tenant/SSRF/signature path" and to leave a
+-- durable record, so blocking it here would make the documented
+-- `POST .../{endpoint_id}/test` endpoint unable to persist anything. A test
+-- delivery targets exactly the one endpoint the caller named and is never
+-- fanned out to the endpoint set as a side effect of a business event, so it
+-- cannot recurse.
 CREATE TRIGGER trg_webhook_deliveries_no_recursive_fanout
 BEFORE INSERT ON webhook_deliveries
 FOR EACH ROW WHEN
     NEW.event_type LIKE 'webhook.delivery_%'
     OR NEW.event_type LIKE 'webhook.endpoint_%'
     OR NEW.event_type LIKE 'notification.delivery_%'
-    OR NEW.event_type = 'webhook.test.v1'
 BEGIN
     SELECT RAISE(ABORT, 'recursive webhook fanout rejected');
 END;

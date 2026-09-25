@@ -1,3 +1,4 @@
+pub mod billing;
 pub mod crypto;
 pub mod d1;
 mod email;
@@ -5,7 +6,9 @@ pub mod password;
 mod platform;
 pub mod providers;
 pub mod queues;
+pub mod r2;
 pub mod webauthn;
+pub mod webhooks;
 
 pub(crate) use email::deliver_auth_code;
 pub(crate) use platform::{
