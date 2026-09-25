@@ -1,6 +1,6 @@
 # Plan 05 — Runs, sessions, tool policy, usage, budgets
 
-Status: Review — Contract Gate `p05-cg-v1` frozen at `b5a5ea8`; implementation, external integration, and the fresh-D1 managed control-loop smoke are complete. P05 Integration Gate is a conditional PASS; public CUA/browser execution and passive cancellation remain explicit limitations.
+Status: Complete (conditional gate) — Contract Gate `p05-cg-v1` frozen at `b5a5ea8`; implementation, external integration, and the fresh-D1 managed control-loop smoke are complete. P05 Integration Gate is a conditional PASS; public CUA/browser execution and passive cancellation remain explicit limitations.
 Specs: F08, F12, F13, F16, F21
 Depends on: P03, P04
 
