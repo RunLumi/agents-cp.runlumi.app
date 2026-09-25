@@ -4,6 +4,7 @@ import { LumiWordmark } from "@/components/brand";
 import {
   IconHome,
   IconLogout,
+  IconMenu,
   IconShieldLock,
   IconUsers,
   IconUsersGroup,
@@ -55,6 +56,7 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
   const [showCreateTeam, setShowCreateTeam] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const requestGeneration = useRef(0);
   const selected = useMemo(
     () => me.organizations.find((organization) => organization.organization.org_id === selectedId),
@@ -97,6 +99,15 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
     return () => controller.abort();
   }, [selectedId, refreshKey]);
 
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [mobileNavOpen]);
+
   function refresh() {
     setRefreshKey((value) => value + 1);
   }
@@ -105,12 +116,14 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
     requestGeneration.current += 1;
     setSelectedId(next.organization.org_id);
     setSection("overview");
+    setMobileNavOpen(false);
     setLoad({ kind: "loading" });
     window.history.pushState({}, "", `/org/${next.organization.slug}/overview`);
   }
 
   function navigate(next: Section) {
     setSection(next);
+    setMobileNavOpen(false);
     if (selected) window.history.pushState({}, "", `/org/${selected.organization.slug}/${next}`);
   }
 
@@ -144,7 +157,7 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                   );
                   if (next) selectOrganization(next);
                 }}
-                className="min-h-10 max-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                className="min-h-10 min-w-0 max-w-[220px] shrink rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
               >
                 {me.organizations.map((organization) => (
                   <option
@@ -160,37 +173,49 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
           <div className="flex items-center gap-2">
             <span className="hidden text-xs text-[var(--muted)] sm:inline">{me.user.email}</span>
             <button type="button" onClick={onSignOut} className={secondaryButton}>
-              <IconLogout className="size-4" />
+              <IconLogout className="hidden size-4 sm:block" />
               Sign out
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen((open) => !open)}
+              aria-expanded={mobileNavOpen}
+              aria-controls="mobile-nav"
+              aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"}
+              className="grid size-11 shrink-0 place-items-center rounded-lg text-[var(--civic-navy)] outline-none transition hover:bg-[var(--panel-hover)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] md:hidden"
+            >
+              {mobileNavOpen ? <IconX className="size-5" /> : <IconMenu className="size-5" />}
             </button>
           </div>
         </div>
-      </header>
 
-      <div className="px-3 pt-3 md:hidden">
-        <nav aria-label="Organization sections">
-          <ul className="glass-surface flex items-center gap-1 overflow-x-auto rounded-[14px] p-1">
-            {sections.map(({ id, label, icon: Icon }) => (
-              <li key={id}>
-                <button
-                  type="button"
-                  onClick={() => navigate(id)}
-                  aria-current={section === id ? "page" : undefined}
-                  className={[
-                    "flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-[10px] px-3 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
-                    section === id
-                      ? "bg-[var(--panel)] font-semibold text-[var(--lumi-blue)] shadow-[var(--shadow)]"
-                      : "text-[var(--muted-strong)] hover:text-[var(--foreground)]",
-                  ].join(" ")}
-                >
-                  <Icon className="size-[18px]" />
-                  {label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      </div>
+        {mobileNavOpen ? (
+          <div id="mobile-nav" className="mt-3 md:hidden">
+            <nav aria-label="Organization sections" className="glass-surface rounded-[14px] p-1">
+              <ul className="grid gap-1">
+                {sections.map(({ id, label, icon: Icon }) => (
+                  <li key={id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(id)}
+                      aria-current={section === id ? "page" : undefined}
+                      className={[
+                        "flex min-h-11 w-full items-center gap-2.5 rounded-[10px] px-3 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
+                        section === id
+                          ? "bg-[var(--panel)] font-semibold text-[var(--lumi-blue)] shadow-[var(--shadow)]"
+                          : "text-[var(--muted-strong)] hover:bg-[var(--panel-hover)] hover:text-[var(--foreground)]",
+                      ].join(" ")}
+                    >
+                      <Icon className="size-[18px] shrink-0" />
+                      {label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </div>
+        ) : null}
+      </header>
 
       <div className="mx-auto grid max-w-[1440px] grid-cols-1 md:grid-cols-[232px_minmax(0,1fr)]">
         <aside className="hidden min-h-[calc(100dvh-4.25rem)] border-r border-[var(--border)] px-3 py-5 md:block">
@@ -464,7 +489,7 @@ function MembersPanel({
           <ErrorPanel error={error} />
         </div>
       ) : null}
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full min-w-[620px] text-left text-sm">
           <thead className="bg-[var(--panel-hover)] text-xs text-[var(--muted)]">
             <tr>
