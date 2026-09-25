@@ -7,8 +7,8 @@ Last initialized: 2026-09-24
 ## Current phase
 
 - Active execution model: **P00**
-- Current implementation phases: **P05 in progress; P04 implemented/review; P03 complete**
-- Next implementable phase: **P05 packets are unlocked by the frozen P05 Contract Gate; P05 Integration Gate remains the phase exit**
+- Current implementation phases: **P05 complete; P04 implemented/review; P03 complete**
+- Next implementable phase: **P06 planning is dependency-unblocked by the completed P05 conditional gate; P06 remains blocked until its coordinator activates the plan**
 - Current Contract Gates: **P02-CG `p02-cg-v2`; P03-CG `p03-cg-v1`; P04-CG `p04-cg-v1`; P05-CG `p05-cg-v1` (freeze `b5a5ea8`)**
 - Shared-file owner: **P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
 - Integration owner: **P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
