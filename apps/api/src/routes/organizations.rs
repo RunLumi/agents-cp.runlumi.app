@@ -174,6 +174,16 @@ pub async fn create(
         &context,
     )
     .await?;
+    // P06: the license projection identifier is derived from the SAME
+    // idempotency key as the organization and membership, so a retried create
+    // cannot mint a second license row for the same organization.
+    let license_state_id = deterministic_resource_id(
+        "lic",
+        &key,
+        &format!("license:{}", authenticated.principal.user_id.as_str()),
+        &context,
+    )
+    .await?;
     let event_id = generated_id("sec");
     let repository = OrganizationRepository::new(database);
     if let Some(existing) = repository
@@ -239,10 +249,22 @@ pub async fn create(
         "organization.created.v1",
         &json!({ "kind": "team" }),
     )?;
+    // P06: the license projection joins the SAME batch. Dispatch fails closed
+    // when an organization has no `license_states` row, so creating the org
+    // without it would produce a tenant that can never run an automation — a
+    // failure that only surfaces when someone tries to use the product.
+    let license_statement = repository
+        .insert_default_license_state_statement(
+            license_state_id.as_str(),
+            org_id.as_str(),
+            &context.received_at,
+        )
+        .map_err(|error| database_error(&context, error))?;
     database
         .batch(vec![
             org_statement,
             membership_statement,
+            license_statement,
             security_statement,
             outbox,
         ])

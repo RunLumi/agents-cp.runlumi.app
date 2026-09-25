@@ -17,6 +17,58 @@ SET state = ?2, version = version + 1, updated_at = ?3
 WHERE org_id = ?1 AND state = ?4 AND version = ?5
 "#;
 
+// P06: seed the license projection alongside the organization. `active` is the
+// only state that permits new managed work without a grace window, and it is
+// what a new self-service tenant should see. The grace columns are written
+// explicitly rather than left to defaults so the seeded values are visible in
+// this file instead of being spread across a migration and a repository.
+//
+// A billing provider transition is what later moves this row. Nothing here
+// reads a provider, and no provider product/price ID can appear in it.
+const INSERT_DEFAULT_LICENSE_STATE_SQL: &str = r#"
+INSERT INTO license_states (
+    license_state_id,
+    org_id,
+    state,
+    local_offline_grace_seconds,
+    cloud_control_plane_grace_seconds,
+    platform_paid_inference_grace_seconds,
+    reason_code,
+    version,
+    created_at,
+    updated_at
+)
+VALUES (
+    ?1,
+    ?2,
+    'active',
+    ?4,
+    ?5,
+    0,
+    'license_initialized',
+    1,
+    ?3,
+    ?3
+)
+"#;
+
+/// The identifiers and attributes needed to create an organization.
+///
+/// A struct rather than a long positional list: creation now writes four rows
+/// that must share one transaction, and a caller that can transpose two
+/// adjacent `&str` identifiers would silently create a mismatched tenant.
+#[derive(Clone, Copy, Debug)]
+pub struct NewOrganization<'a> {
+    pub org_id: &'a str,
+    pub membership_id: &'a str,
+    /// P06 license projection identifier, derived from the same idempotency key.
+    pub license_state_id: &'a str,
+    pub display_name: &'a str,
+    pub slug: &'a str,
+    pub created_by: &'a str,
+    pub now: &'a Timestamp,
+}
+
 const INSERT_MEMBERSHIP_SQL: &str = r#"
 INSERT INTO memberships (
     membership_id, org_id, user_id, role, status, version, invited_by_user_id, joined_at, created_at, updated_at
@@ -384,22 +436,60 @@ impl<'a> OrganizationRepository<'a> {
 
     pub async fn create_organization(
         &self,
-        org_id: &str,
-        membership_id: &str,
-        display_name: &str,
-        slug: &str,
-        created_by: &str,
-        now: &Timestamp,
+        input: &NewOrganization<'_>,
     ) -> worker::Result<OrganizationRecord> {
+        let NewOrganization {
+            org_id,
+            membership_id,
+            license_state_id,
+            display_name,
+            slug,
+            created_by,
+            now,
+        } = *input;
+        // P06: the license projection is created in the SAME batch as the
+        // organization. Dispatch fails closed when `license_states` has no row
+        // for the organization, so creating the org without it would produce a
+        // tenant that can never run an automation — a failure that only shows
+        // up when someone tries to use the product. One batch means an
+        // organization either has both facts or neither.
         self.database
             .batch(vec![
                 self.insert_organization_statement(org_id, display_name, slug, created_by, now)?,
                 self.insert_owner_membership_statement(membership_id, org_id, created_by, now)?,
+                self.insert_default_license_state_statement(license_state_id, org_id, now)?,
             ])
             .await?;
         self.find_organization(org_id).await?.ok_or_else(|| {
             worker::Error::RustError("created organization could not be read".into())
         })
+    }
+
+    /// Seed the P06 server-side license projection for a new organization.
+    ///
+    /// A new organization starts `active` on the platform defaults, which is
+    /// the state that lets a self-service tenant actually use the product. The
+    /// grace windows are the frozen F18 ceilings: seven days of signed offline
+    /// validity for local-only work, 24 hours for the cloud control plane, and
+    /// zero additional grace for platform-paid inference. A billing provider
+    /// transition is what later moves this row to `grace`, `past_due`, or
+    /// `suspended`; nothing here consults a provider.
+    pub fn insert_default_license_state_statement(
+        &self,
+        license_state_id: &str,
+        org_id: &str,
+        now: &Timestamp,
+    ) -> worker::Result<D1PreparedStatement> {
+        self.database.prepare(
+            INSERT_DEFAULT_LICENSE_STATE_SQL,
+            &[
+                BindValue::Text(license_state_id),
+                BindValue::Text(org_id),
+                BindValue::Text(now.as_str()),
+                BindValue::Integer(604_800),
+                BindValue::Integer(86_400),
+            ],
+        )
     }
 
     /// Public slug lookup for unauthenticated device enrollment begins.
