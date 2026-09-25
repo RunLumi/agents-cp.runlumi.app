@@ -154,6 +154,17 @@ resource_id_type!(ProjectId, InvalidResourceId, Some("prj"));
 resource_id_type!(WorkspaceBindingId, InvalidResourceId, Some("wsb"));
 resource_id_type!(PolicySnapshotId, InvalidResourceId, Some("pol"));
 resource_id_type!(PolicyAckId, InvalidResourceId, Some("pak"));
+// P04 catalog, credential, route, and usage identifiers.
+resource_id_type!(ProviderId, InvalidResourceId, Some("prv"));
+resource_id_type!(ProviderEndpointId, InvalidResourceId, Some("pe"));
+resource_id_type!(ModelId, InvalidResourceId, Some("mdl"));
+resource_id_type!(ModelAliasId, InvalidResourceId, Some("mal"));
+resource_id_type!(CredentialId, InvalidResourceId, Some("cred"));
+resource_id_type!(RouteId, InvalidResourceId, Some("rte"));
+resource_id_type!(RouteVersionId, InvalidResourceId, Some("rtv"));
+resource_id_type!(UsageEventId, InvalidResourceId, Some("use"));
+resource_id_type!(BudgetId, InvalidResourceId, Some("bud"));
+resource_id_type!(BudgetReservationId, InvalidResourceId, Some("bres"));
 
 /// Opaque actor/principal identifier supplied only by trusted identity context.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]

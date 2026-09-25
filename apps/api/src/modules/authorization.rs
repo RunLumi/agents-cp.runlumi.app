@@ -114,6 +114,14 @@ pub enum Permission {
     DevicesManage,
     ProjectsRead,
     ProjectsManage,
+    ModelsRead,
+    ModelsManage,
+    CredentialsRead,
+    CredentialsManage,
+    RoutesRead,
+    RoutesManage,
+    InferenceUse,
+    UsageRead,
     Unknown(String),
 }
 
@@ -134,6 +142,14 @@ impl Permission {
             "devices.manage" => Self::DevicesManage,
             "projects.read" => Self::ProjectsRead,
             "projects.manage" => Self::ProjectsManage,
+            "models.read" => Self::ModelsRead,
+            "models.manage" => Self::ModelsManage,
+            "credentials.read" => Self::CredentialsRead,
+            "credentials.manage" => Self::CredentialsManage,
+            "routes.read" => Self::RoutesRead,
+            "routes.manage" => Self::RoutesManage,
+            "inference.use" => Self::InferenceUse,
+            "usage.read" => Self::UsageRead,
             _ => Self::Unknown(value.to_owned()),
         }
     }
@@ -154,6 +170,14 @@ impl Permission {
             Self::DevicesManage => "devices.manage",
             Self::ProjectsRead => "projects.read",
             Self::ProjectsManage => "projects.manage",
+            Self::ModelsRead => "models.read",
+            Self::ModelsManage => "models.manage",
+            Self::CredentialsRead => "credentials.read",
+            Self::CredentialsManage => "credentials.manage",
+            Self::RoutesRead => "routes.read",
+            Self::RoutesManage => "routes.manage",
+            Self::InferenceUse => "inference.use",
+            Self::UsageRead => "usage.read",
             Self::Unknown(value) => value,
         }
     }
@@ -167,6 +191,9 @@ impl Permission {
                 | Self::AuditRead
                 | Self::DevicesRead
                 | Self::ProjectsRead
+                | Self::ModelsRead
+                | Self::RoutesRead
+                | Self::UsageRead
         )
     }
 }
@@ -358,6 +385,14 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::DevicesManage
                 | Permission::ProjectsRead
                 | Permission::ProjectsManage
+                | Permission::ModelsRead
+                | Permission::ModelsManage
+                | Permission::CredentialsRead
+                | Permission::CredentialsManage
+                | Permission::RoutesRead
+                | Permission::RoutesManage
+                | Permission::InferenceUse
+                | Permission::UsageRead
         ),
         MembershipRole::Member => matches!(
             permission,
@@ -367,6 +402,10 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::TeamsRead
                 | Permission::DevicesRead
                 | Permission::ProjectsRead
+                | Permission::ModelsRead
+                | Permission::RoutesRead
+                | Permission::InferenceUse
+                | Permission::UsageRead
         ),
         MembershipRole::Viewer => matches!(
             permission,
@@ -377,6 +416,8 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::AuditRead
                 | Permission::DevicesRead
                 | Permission::ProjectsRead
+                | Permission::ModelsRead
+                | Permission::RoutesRead
         ),
     }
 }

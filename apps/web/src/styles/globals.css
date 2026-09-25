@@ -1,8 +1,17 @@
+@import "@fontsource-variable/geist/index.css";
+@import "@fontsource-variable/geist-mono/index.css";
 @import "tailwindcss";
+
+@theme {
+  --font-sans:
+    "Geist Variable", "Noto Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
 
 :root {
   font-family:
-    Geist,
+    "Geist Variable",
     "Noto Sans",
     ui-sans-serif,
     system-ui,
@@ -19,6 +28,7 @@
   --muted: #5e6677;
   --muted-strong: #334155;
   --border: #d9dee8;
+  --border-strong: #c8d0de;
   --ring: #006093;
   --lumi-blue: #006093;
   --lumi-blue-soft: #e4f3fc;
@@ -31,6 +41,16 @@
     inset 0 1px 0 color-mix(in oklch, white 60%, transparent),
     0 1px 2px -1px color-mix(in oklch, #102a43 8%, transparent),
     0 8px 20px -10px color-mix(in oklch, #102a43 10%, transparent);
+  --shadow-button:
+    inset 0 1px 0 0 color-mix(in oklch, white 22%, transparent),
+    0 1px 2px 0 color-mix(in oklch, #102a43 22%, transparent);
+  /* Liquid glass control layer (DESIGN.md §8.4). Opaque base first. */
+  --glass-bg: #f9f7f2;
+  --glass-border: rgba(255, 255, 255, 0.85);
+  --glass-shadow:
+    inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(16, 42, 67, 0.08),
+    0 8px 24px -16px rgba(16, 42, 67, 0.28), 0 0 0 1px rgba(16, 42, 67, 0.07);
+  --glass-fill: rgba(249, 247, 242, 0.84);
 }
 
 * {
@@ -60,6 +80,48 @@ button {
 }
 .app-root {
   isolation: isolate;
+}
+
+/* Liquid glass — control/navigation layer only (DESIGN.md §8.4).
+   Never apply it to reading surfaces, and never nest glass inside glass. */
+.glass-surface {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-surface {
+    background: var(--glass-fill);
+    -webkit-backdrop-filter: blur(24px) saturate(1.2);
+    backdrop-filter: blur(24px) saturate(1.2);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass-surface {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .glass-surface {
+    background: var(--panel);
+    border-color: var(--border-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .glass-surface {
+    background: Canvas;
+    border-color: CanvasText;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

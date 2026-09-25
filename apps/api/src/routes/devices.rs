@@ -33,14 +33,14 @@ use crate::{
         },
         policy::{self, PolicyInputs},
     },
-    repositories::{
-        DeviceRepository, OrganizationRepository, PolicyRepository, ProjectRepository,
-        SecurityEventInput, SecurityEventRepository,
-    },
+    repositories::{DeviceRepository, OrganizationRepository, PolicyRepository, ProjectRepository},
     routes::{
         authorization::authorize_org,
         errors,
-        support::{database, database_error, domain_error, idempotency_key, outbox_statement},
+        support::{
+            database, database_error, domain_error, idempotency_key, outbox_statement,
+            security_event_statement,
+        },
     },
 };
 
@@ -1255,27 +1255,18 @@ pub async fn approve_enrollment(
             )
         })?;
     let event_id = generated_id("sec");
-    let security = SecurityEventInput {
-        event_id: &event_id,
-        organization_id: Some(org_id.as_str()),
-        actor_type: "user",
-        actor_id: Some(access.principal.user_id.as_str()),
-        effective_user_id: Some(access.principal.user_id.as_str()),
-        session_id: Some(access.principal.session_id.as_str()),
-        device_id: Some(&device_id),
-        action: "device.enrolled.v1",
-        resource_type: "device",
-        resource_id: Some(&device_id),
-        outcome: "success",
-        reason: None,
-        metadata: &json!({ "enrollment_id": enrollment_id }),
-        request_id: context.request_id.as_str(),
-        correlation_id: context.correlation_id.as_str(),
-        created_at: &context.received_at,
-    };
-    let security_statement = SecurityEventRepository::new(database)
-        .insert_statement(&security)
-        .map_err(|_| service_unavailable(&context))?;
+    let security_statement = security_event_statement(
+        database,
+        &context,
+        Some(&access.principal),
+        Some(org_id.as_str()),
+        &event_id,
+        "device.enrolled.v1",
+        "device",
+        Some(&device_id),
+        "success",
+        &json!({ "enrollment_id": enrollment_id }),
+    )?;
     database
         .batch(vec![security_statement])
         .await
@@ -1458,27 +1449,18 @@ pub async fn revoke_device(
         ));
     }
     let event_id = generated_id("sec");
-    let security = SecurityEventInput {
-        event_id: &event_id,
-        organization_id: Some(org_id.as_str()),
-        actor_type: "user",
-        actor_id: Some(access.principal.user_id.as_str()),
-        effective_user_id: Some(access.principal.user_id.as_str()),
-        session_id: Some(access.principal.session_id.as_str()),
-        device_id: Some(&device_id),
-        action: "device.revoked.v1",
-        resource_type: "device",
-        resource_id: Some(&device_id),
-        outcome: "success",
-        reason: None,
-        metadata: &json!({}),
-        request_id: context.request_id.as_str(),
-        correlation_id: context.correlation_id.as_str(),
-        created_at: &context.received_at,
-    };
-    let statement = SecurityEventRepository::new(database)
-        .insert_statement(&security)
-        .map_err(|_| service_unavailable(&context))?;
+    let statement = security_event_statement(
+        database,
+        &context,
+        Some(&access.principal),
+        Some(org_id.as_str()),
+        &event_id,
+        "device.revoked.v1",
+        "device",
+        Some(&device_id),
+        "success",
+        &json!({}),
+    )?;
     database
         .batch(vec![statement])
         .await

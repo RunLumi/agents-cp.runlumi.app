@@ -9,7 +9,7 @@ use crate::{
         ActorContext, ActorId, ApiError, ApiErrorCode, EventEnvelope, EventType, OrganizationId,
         Principal, RequestContext,
     },
-    repositories::{OutboxRepository, UserRecord},
+    repositories::{OutboxRepository, SecurityEventInput, SecurityEventRepository, UserRecord},
     routes::errors,
 };
 
@@ -133,6 +133,55 @@ pub fn outbox_statement(
                 context,
                 ApiErrorCode::ServiceUnavailable,
                 "The event store is unavailable.",
+            )
+        })
+}
+
+/// Build an immutable security-event insert for a P04 mutation. The helper
+/// intentionally accepts only bounded metadata and never serializes a request
+/// body, credential, prompt, or response.
+#[allow(clippy::too_many_arguments)]
+pub fn security_event_statement<'a>(
+    database: &'a D1Adapter,
+    context: &RequestContext,
+    principal: Option<&Principal>,
+    organization_id: Option<&'a str>,
+    event_id: &'a str,
+    action: &'a str,
+    resource_type: &'a str,
+    resource_id: Option<&'a str>,
+    outcome: &'a str,
+    metadata: &serde_json::Value,
+) -> Result<worker::d1::D1PreparedStatement, ApiError> {
+    let input = SecurityEventInput {
+        event_id,
+        organization_id,
+        actor_type: if principal.is_some() {
+            "user"
+        } else {
+            "system"
+        },
+        actor_id: principal.map(|value| value.user_id.as_str()),
+        effective_user_id: principal.map(|value| value.user_id.as_str()),
+        session_id: principal.map(|value| value.session_id.as_str()),
+        device_id: None,
+        action,
+        resource_type,
+        resource_id,
+        outcome,
+        reason: None,
+        metadata,
+        request_id: context.request_id.as_str(),
+        correlation_id: context.correlation_id.as_str(),
+        created_at: &context.received_at,
+    };
+    SecurityEventRepository::new(database)
+        .insert_statement(&input)
+        .map_err(|_| {
+            errors::api_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "The security event store is unavailable.",
             )
         })
 }

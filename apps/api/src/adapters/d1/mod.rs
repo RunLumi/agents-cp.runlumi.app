@@ -30,7 +30,7 @@ impl D1Adapter {
     /// Prepare a constant SQL statement and bind every dynamic value.
     pub fn prepare(
         &self,
-        sql: &'static str,
+        sql: &str,
         values: &[BindValue<'_>],
     ) -> worker::Result<D1PreparedStatement> {
         let values = values
