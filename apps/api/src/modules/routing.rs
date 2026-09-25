@@ -180,6 +180,7 @@ pub fn select_candidates(
             let provider = provider_by_id.get(candidate.provider_id.as_str())?;
             let model = model_by_id.get(candidate.model_id.as_str())?;
             if !provider_satisfies(provider, policy)
+                || !policy.allows_model(&candidate.model_id)
                 || provider.lifecycle == CatalogLifecycle::Disabled
                 || !model_satisfies(model, &required)
                 || model.provider_id != candidate.provider_id
@@ -201,31 +202,43 @@ pub fn select_candidates(
         .collect::<Vec<_>>();
 
     if eligible.is_empty() {
-        return Err(RouteSelectionError::NoAllowedCandidate);
+        let capability_mismatch = !required.is_empty()
+            && config.candidates.iter().any(|candidate| {
+                model_by_id
+                    .get(candidate.model_id.as_str())
+                    .is_some_and(|model| !model_satisfies(model, &required))
+            });
+        return Err(if capability_mismatch {
+            RouteSelectionError::UnsupportedCapability
+        } else {
+            RouteSelectionError::NoAllowedCandidate
+        });
     }
     match config.strategy {
-        RouteStrategy::Fixed | RouteStrategy::OrderedFallback => {}
+        RouteStrategy::Fixed => eligible.truncate(1),
+        RouteStrategy::OrderedFallback => {}
         RouteStrategy::WeightedHealthAware => {
-            eligible.sort_by(|left, right| {
-                let left_key = weighted_key(&left.provider_id, &left.model_id, seed);
-                let right_key = weighted_key(&right.provider_id, &right.model_id, seed);
-                right
-                    .weight
-                    .cmp(&left.weight)
-                    .then_with(|| left_key.cmp(&right_key))
-            });
+            let total_weight = eligible
+                .iter()
+                .map(|candidate| u64::from(candidate.weight))
+                .sum::<u64>();
+            if total_weight > 0 {
+                let mut ticket = seed % total_weight;
+                let mut selected_index = 0;
+                for (index, candidate) in eligible.iter().enumerate() {
+                    let weight = u64::from(candidate.weight);
+                    if ticket < weight {
+                        selected_index = index;
+                        break;
+                    }
+                    ticket -= weight;
+                }
+                let selected = eligible.remove(selected_index);
+                eligible.insert(0, selected);
+            }
         }
     }
     Ok(eligible)
-}
-
-fn weighted_key(provider_id: &str, model_id: &str, seed: u64) -> u64 {
-    let mut hash = seed ^ 0x9e37_79b9_7f4a_7c15;
-    for byte in provider_id.bytes().chain(model_id.bytes()) {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x100_0000_01b3);
-    }
-    hash
 }
 
 pub fn compare_route_versions(left: i64, right: i64) -> Ordering {
@@ -298,6 +311,6 @@ mod tests {
             &["tools".to_owned()],
             1,
         );
-        assert_eq!(result, Err(RouteSelectionError::NoAllowedCandidate));
+        assert_eq!(result, Err(RouteSelectionError::UnsupportedCapability));
     }
 }

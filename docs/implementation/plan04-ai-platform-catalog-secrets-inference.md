@@ -1,6 +1,6 @@
 # Plan 04 — Model catalog, credentials, AI inference router/proxy
 
-Status: Planned
+Status: Implemented — P04-owned scope; P03 route/policy integration merged and verified
 Specs: F09, F10, F11, F12 foundations, F21, F23
 Depends on: P02
 May run in parallel with: P03
@@ -239,3 +239,5 @@ P05 can depend on:
 - project/org model policy hook;
 - credential resolution;
 - route health/fallback semantics.
+
+Evidence: `docs/implementation/gates/P04-IG.md` records the fresh combined D1 migration, 131 Rust tests, Worker/WASM dry-run, web build, authenticated UI captures, and the P03/P04 vertical smokes. P03 route/policy integration is merged; local downstream-disconnect delivery remains an explicit runtime follow-up rather than a hidden claim.

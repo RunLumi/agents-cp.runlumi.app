@@ -17,3 +17,9 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 worker = { version = "0.8", features = ["http", "axum", "d1", "queue"] }
 worker-macros = { version = "0.8", features = ["http"] }
+passkey-auth = "0.1.3"
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "password-hash", "getrandom"] }
+base64 = "0.22"
+url = "2"
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

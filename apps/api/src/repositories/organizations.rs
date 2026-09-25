@@ -32,7 +32,7 @@ LIMIT 1
 
 const ORGS_FOR_USER_SQL: &str = r#"
 SELECT o.org_id, o.display_name, o.slug, o.state, o.version,
-       o.created_by_user_id, o.created_at, o.updated_at, m.membership_id, m.role, m.status, m.version
+       o.created_by_user_id, o.created_at, o.updated_at, m.membership_id, m.role, m.status, m.version AS membership_version
 FROM organizations o
 JOIN memberships m ON m.org_id = o.org_id
 WHERE m.user_id = ?1 AND m.status = 'active'

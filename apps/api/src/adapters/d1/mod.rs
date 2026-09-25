@@ -52,7 +52,16 @@ impl D1Adapter {
         &self,
         statements: Vec<D1PreparedStatement>,
     ) -> worker::Result<Vec<D1Result>> {
-        self.database.batch(statements).await
+        let results = self.database.batch(statements).await?;
+        if let Some(result) = results.iter().find(|result| !result.success()) {
+            let detail = result
+                .error()
+                .unwrap_or_else(|| "D1 batch statement reported failure".to_owned());
+            return Err(worker::Error::RustError(format!(
+                "D1 batch statement failed: {detail}"
+            )));
+        }
+        Ok(results)
     }
 
     /// Return the number of rows affected when D1 supplied that metadata.

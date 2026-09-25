@@ -5,6 +5,7 @@ import {
   IconHome,
   IconLogout,
   IconMenu,
+  IconRoute,
   IconShieldLock,
   IconUsers,
   IconUsersGroup,
@@ -12,6 +13,7 @@ import {
 } from "@/components/icons";
 import { AccountPanel as AccountSecurityPanel } from "@/features/account/account-panel";
 import { DevicesPanel } from "@/features/devices/devices-panel";
+import { ModelsRoutingPanel } from "@/features/models/models-routing-panel";
 import { PolicyPanel } from "@/features/policy/policy-panel";
 import { ProjectsPanel } from "@/features/projects/projects-panel";
 import {
@@ -36,7 +38,15 @@ interface OrgDashboardProps {
   onOrganizationsChanged: () => void;
 }
 
-type Section = "overview" | "members" | "teams" | "projects" | "devices" | "policy" | "account";
+type Section =
+  | "overview"
+  | "members"
+  | "teams"
+  | "projects"
+  | "devices"
+  | "policy"
+  | "models"
+  | "account";
 
 const sections: { id: Section; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: "overview", label: "Overview", icon: IconHome },
@@ -45,6 +55,7 @@ const sections: { id: Section; label: string; icon: ComponentType<{ className?: 
   { id: "projects", label: "Projects", icon: IconHome },
   { id: "devices", label: "Devices", icon: IconUsers },
   { id: "policy", label: "Policy", icon: IconShieldLock },
+  { id: "models", label: "Models & routing", icon: IconRoute },
   { id: "account", label: "Account security", icon: IconShieldLock },
 ];
 
@@ -55,7 +66,18 @@ type LoadState =
 
 export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashboardProps) {
   const [selectedId, setSelectedId] = useState(me.organizations[0]?.organization.org_id ?? "");
-  const [section, setSection] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>(() => {
+    const path = window.location.pathname.split("/").at(-1);
+    return path === "members" ||
+      path === "teams" ||
+      path === "projects" ||
+      path === "devices" ||
+      path === "policy" ||
+      path === "models" ||
+      path === "account"
+      ? path
+      : "overview";
+  });
   const [refreshKey, setRefreshKey] = useState(0);
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [showCreateOrg, setShowCreateOrg] = useState(me.organizations.length === 0);
@@ -355,6 +377,9 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                   <DevicesPanel orgId={load.organization.org_id} currentUserId={me.user.id} />
                 ) : null}
                 {section === "policy" ? <PolicyPanel orgId={load.organization.org_id} /> : null}
+                {section === "models" ? (
+                  <ModelsRoutingPanel orgId={load.organization.org_id} membership={selected} />
+                ) : null}
                 {section === "account" ? <AccountSecurityPanel me={me} /> : null}
               </>
             )}

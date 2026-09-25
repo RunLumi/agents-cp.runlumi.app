@@ -176,7 +176,12 @@ pub async fn reauthenticate(
     let purpose = body.purpose.as_deref().unwrap_or("ownership_transfer");
     if !matches!(
         purpose,
-        "ownership_transfer" | "identity_link" | "org_lifecycle"
+        "ownership_transfer"
+            | "identity_link"
+            | "org_lifecycle"
+            | "passkey_management"
+            | "password_change"
+            | "account_recovery"
     ) {
         return Err(domain_error(
             &context,

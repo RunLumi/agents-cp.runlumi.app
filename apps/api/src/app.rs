@@ -6,12 +6,15 @@ use axum::{
 };
 use worker::{Env, Queue, SendEmail};
 
+use crate::adapters::crypto::DEVELOPMENT_CREDENTIAL_KEY_HEX;
+use crate::adapters::webauthn::{WebAuthnAdapter, WebAuthnConfig};
+
 use crate::{
     adapters::d1::D1Adapter,
     http::{json_body_limit, request_boundary},
     routes::{
-        account, auth, device_auth, devices, foundation_checks, health::health, meta::meta,
-        organizations, projects,
+        account, ai_catalog, auth, authenticators, device_auth, devices, foundation_checks,
+        health::health, inference, meta::meta, organizations, projects,
     },
 };
 
@@ -22,6 +25,10 @@ pub(crate) struct AppState {
     pub(crate) environment: String,
     pub(crate) email: Option<SendEmail>,
     pub(crate) email_from: Option<String>,
+    pub(crate) credential_key: Option<String>,
+    pub(crate) provider_allowlist: Vec<String>,
+    pub(crate) allow_local_provider_endpoints: bool,
+    pub(crate) webauthn: Option<WebAuthnAdapter>,
 }
 
 /// Construct the HTTP router for one Worker request. Public liveness/meta
@@ -32,15 +39,80 @@ pub fn router(env: Env) -> Router {
         .var("ENVIRONMENT")
         .map(|value| value.to_string() == "development")
         .unwrap_or(false);
+    let environment = env
+        .var("ENVIRONMENT")
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| "production".to_owned());
+    let credential_key = if environment == "development" {
+        Some(DEVELOPMENT_CREDENTIAL_KEY_HEX.to_owned())
+    } else {
+        env.var("CREDENTIAL_ENCRYPTION_KEY")
+            .ok()
+            .map(|value| value.to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let provider_allowlist = env
+        .var("LUMI_PROVIDER_ALLOWLIST")
+        .ok()
+        .map(|value| {
+            value
+                .to_string()
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_ascii_lowercase)
+                .collect()
+        })
+        .unwrap_or_default();
+    let allow_local_provider_endpoints = environment == "development";
+    let webauthn = if environment == "development" {
+        WebAuthnConfig::new(
+            Some(
+                env.var("WEBAUTHN_RP_ID")
+                    .ok()
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "localhost".to_owned()),
+            ),
+            Some(
+                env.var("WEBAUTHN_RP_NAME")
+                    .ok()
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "Lumi Agents".to_owned()),
+            ),
+            Some(
+                env.var("WEBAUTHN_ORIGINS")
+                    .ok()
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "http://localhost:5173".to_owned()),
+            ),
+        )
+        .ok()
+        .map(WebAuthnAdapter::new)
+    } else {
+        WebAuthnConfig::new(
+            env.var("WEBAUTHN_RP_ID")
+                .ok()
+                .map(|value| value.to_string()),
+            env.var("WEBAUTHN_RP_NAME")
+                .ok()
+                .map(|value| value.to_string()),
+            env.var("WEBAUTHN_ORIGINS")
+                .ok()
+                .map(|value| value.to_string()),
+        )
+        .ok()
+        .map(WebAuthnAdapter::new)
+    };
     let state = Arc::new(AppState {
         database: env.d1("DB").ok().map(D1Adapter::new).map(Arc::new),
         queue: env.queue("OUTBOX_QUEUE").ok(),
-        environment: env
-            .var("ENVIRONMENT")
-            .map(|value| value.to_string())
-            .unwrap_or_else(|_| "production".to_owned()),
+        environment,
         email: env.send_email("EMAIL").ok(),
         email_from: env.var("EMAIL_FROM").ok().map(|value| value.to_string()),
+        credential_key,
+        provider_allowlist,
+        allow_local_provider_endpoints,
+        webauthn,
     });
 
     let mut routes = Router::<Arc<AppState>>::new()
@@ -50,6 +122,38 @@ pub fn router(env: Env) -> Router {
         .route("/api/v1/auth/verify-email", post(auth::verify_email))
         .route("/api/v1/auth/login/start", post(auth::login_start))
         .route("/api/v1/auth/login/complete", post(auth::login_complete))
+        .route(
+            "/api/v1/auth/passkey/signup/start",
+            post(authenticators::passkey_signup_start),
+        )
+        .route(
+            "/api/v1/auth/passkey/signup/complete",
+            post(authenticators::passkey_signup_complete),
+        )
+        .route(
+            "/api/v1/auth/passkey/login/start",
+            post(authenticators::passkey_login_start),
+        )
+        .route(
+            "/api/v1/auth/passkey/login/complete",
+            post(authenticators::passkey_login_complete),
+        )
+        .route(
+            "/api/v1/auth/password/signup",
+            post(authenticators::password_signup),
+        )
+        .route(
+            "/api/v1/auth/password/login",
+            post(authenticators::password_login),
+        )
+        .route(
+            "/api/v1/auth/password/forgot",
+            post(authenticators::password_forgot),
+        )
+        .route(
+            "/api/v1/auth/password/reset",
+            post(authenticators::password_reset),
+        )
         .route("/api/v1/auth/logout", post(auth::logout))
         .route("/api/v1/auth/refresh", post(auth::refresh))
         .route("/api/v1/auth/device-code", post(device_auth::start))
@@ -126,7 +230,10 @@ pub fn router(env: Env) -> Router {
             delete(organizations::remove_team_member),
         )
         .route("/api/v1/orgs/{org_id}/audit", get(organizations::audit))
-        .route("/api/v1/orgs/{org_id}/policy", get(projects::org_policy))
+        .route(
+            "/api/v1/orgs/{org_id}/policy",
+            get(projects::org_policy).put(ai_catalog::update_policy),
+        )
         .route("/api/v1/orgs/{org_id}/devices", get(devices::list_devices))
         .route(
             "/api/v1/orgs/{org_id}/devices/{device_id}",
@@ -185,6 +292,63 @@ pub fn router(env: Env) -> Router {
             "/api/v1/orgs/{org_id}/projects/{project_id}/bindings/{binding_id}",
             delete(projects::delete_project_binding),
         )
+        .route("/api/v1/orgs/{org_id}/catalog", get(ai_catalog::catalog))
+        .route(
+            "/api/v1/orgs/{org_id}/catalog/providers",
+            post(ai_catalog::create_provider),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/catalog/models",
+            post(ai_catalog::create_model),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/catalog/providers/{provider_id}",
+            patch(ai_catalog::update_provider_lifecycle),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/catalog/models/{model_id}",
+            patch(ai_catalog::update_model_lifecycle),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/credentials",
+            get(ai_catalog::list_credentials).post(ai_catalog::create_credential),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/credentials/{credential_id}/rotate",
+            post(ai_catalog::rotate_credential),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/credentials/{credential_id}/revoke",
+            post(ai_catalog::revoke_credential),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/routes",
+            get(ai_catalog::list_routes).post(ai_catalog::create_route),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/routes/{route_id}/publish",
+            post(ai_catalog::publish_route),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/routes/{route_id}/rollback",
+            post(ai_catalog::rollback_route),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/routes/{route_id}/history",
+            get(ai_catalog::route_history),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/routes/{route_id}",
+            patch(ai_catalog::update_route_lifecycle),
+        )
+        .route("/api/v1/orgs/{org_id}/usage", get(ai_catalog::usage))
+        .route("/api/v1/inference/models", get(inference::models))
+        .route("/api/v1/inference/routes/{alias}", get(inference::route))
+        .route("/api/v1/inference/responses", post(inference::responses))
+        .route(
+            "/api/v1/inference/chat/completions",
+            post(inference::chat_completions),
+        )
         .route("/api/v1/account/sessions", get(account::sessions))
         .route(
             "/api/v1/account/sessions/revoke-all",
@@ -195,6 +359,42 @@ pub fn router(env: Env) -> Router {
             delete(account::revoke_session),
         )
         .route("/api/v1/account/reauth", post(account::reauthenticate))
+        .route(
+            "/api/v1/account/reauth/passkey/start",
+            post(authenticators::reauth_passkey_start),
+        )
+        .route(
+            "/api/v1/account/reauth/passkey/complete",
+            post(authenticators::reauth_passkey_complete),
+        )
+        .route(
+            "/api/v1/account/reauth/password",
+            post(authenticators::reauth_password),
+        )
+        .route(
+            "/api/v1/account/passkeys",
+            get(authenticators::list_passkeys),
+        )
+        .route(
+            "/api/v1/account/passkeys/register/start",
+            post(authenticators::passkey_add_start),
+        )
+        .route(
+            "/api/v1/account/passkeys/register/complete",
+            post(authenticators::passkey_add_complete),
+        )
+        .route(
+            "/api/v1/account/passkeys/{passkey_id}",
+            delete(authenticators::revoke_passkey).patch(authenticators::rename_passkey),
+        )
+        .route(
+            "/api/v1/account/password/status",
+            get(authenticators::password_status),
+        )
+        .route(
+            "/api/v1/account/password",
+            post(authenticators::set_account_password),
+        )
         .route(
             "/api/v1/account/security-events",
             get(account::security_events),

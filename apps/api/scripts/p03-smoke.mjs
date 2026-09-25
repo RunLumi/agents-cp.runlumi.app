@@ -301,6 +301,15 @@ const run = async () => {
     deviceHeaders,
   );
   assert.equal(result.status, 204);
+  result = await request(alice.jar, "GET", `/api/v1/orgs/${orgId}/policy`, undefined, {
+    "X-Org-ID": orgId,
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.persisted, true);
+  assert.equal(result.payload.org_id, orgId);
+  assert.ok(result.payload.model_policy);
+  assert.ok("allowed_aliases" in result.payload);
+  check("9c. integrated policy route exposes P03 snapshot and P04 view", true);
   check("9. device fetched and acked policy", `v${policyVersion}`);
 
   // Cross-org policy replay is structurally impossible: audience = device org.

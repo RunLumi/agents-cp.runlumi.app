@@ -26,8 +26,9 @@ use crate::{
             validate_project_version,
         },
     },
-    repositories::{ProjectGrantRecord, ProjectRepository},
+    repositories::{AiRepository, ProjectGrantRecord, ProjectRepository},
     routes::{
+        ai_catalog,
         authorization::authorize_org,
         errors,
         support::{database, database_error, domain_error, idempotency_key, outbox_statement},
@@ -830,23 +831,56 @@ pub async fn org_policy(
     let snapshot = crate::repositories::PolicyRepository::new(database)
         .latest_snapshot(org_id.as_str())
         .await
-        .map_err(|_| service_unavailable(&context))?
-        .ok_or_else(|| {
-            deny(
-                &context,
-                ApiErrorCode::NotFound,
-                "not_found",
-                "No policy snapshot exists for this organization yet.",
-            )
-        })?;
-    Ok((StatusCode::OK, Json(json!({
-        "policy_id": snapshot.policy_id,
-        "org_id": snapshot.org_id,
-        "policy_version": snapshot.policy_version,
-        "issued_at": snapshot.issued_at,
-        "expires_at": snapshot.expires_at,
-        "signature": Value::Null,
-        "payload": serde_json::from_str::<Value>(&snapshot.payload).unwrap_or_else(|_| json!({})),
-    })))
-        .into_response())
+        .map_err(|_| service_unavailable(&context))?;
+    let model_policy = match AiRepository::new(database).find_policy(&org_id).await {
+        Ok(Some(policy)) => ai_catalog::policy_json(&policy),
+        Ok(None) => ai_catalog::default_policy_json(&org_id, &context),
+        Err(_) => return Err(service_unavailable(&context)),
+    };
+    let mut response = if let Some(snapshot) = snapshot {
+        json!({
+            "policy_id": snapshot.policy_id,
+            "org_id": snapshot.org_id,
+            "policy_version": snapshot.policy_version,
+            "issued_at": snapshot.issued_at,
+            "expires_at": snapshot.expires_at,
+            "signature": Value::Null,
+            "payload": serde_json::from_str::<Value>(&snapshot.payload)
+                .unwrap_or_else(|_| json!({})),
+            "persisted": true,
+        })
+    } else {
+        json!({
+            "policy_id": Value::Null,
+            "org_id": org_id,
+            "policy_version": 0,
+            "issued_at": context.received_at,
+            "expires_at": context.received_at,
+            "signature": Value::Null,
+            "payload": {"models": {"schema_version": 0}},
+            "persisted": false,
+        })
+    };
+    if let Some(response) = response.as_object_mut() {
+        response.insert("model_policy".to_owned(), model_policy.clone());
+    }
+    if let (Some(response), Some(model_policy)) =
+        (response.as_object_mut(), model_policy.as_object())
+    {
+        for key in [
+            "allowed_aliases",
+            "allowed_models",
+            "allowed_providers",
+            "credential_mode",
+            "managed_route_enabled",
+            "version",
+            "created_at",
+            "updated_at",
+        ] {
+            if let Some(value) = model_policy.get(key) {
+                response.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    Ok((StatusCode::OK, Json(response)).into_response())
 }
