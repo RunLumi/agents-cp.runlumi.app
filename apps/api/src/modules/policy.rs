@@ -156,9 +156,15 @@ mod tests {
         });
         assert!(compile_policy_payload(&inputs(&[], None), Some(&extensions)).is_err());
 
-        let extensions = json!({ "tools": { "schema_version": 2, "mcp": [] } });
+        let extensions = json!({
+            "tools": { "schema_version": 2, "mcp": [] },
+            "budgets": { "schema_version": 1, "hard_fail_closed": true },
+            "rate_limits": { "schema_version": 1, "policies": [] }
+        });
         let payload = compile_policy_payload(&inputs(&[], None), Some(&extensions)).unwrap();
         assert_eq!(payload["tools"]["schema_version"], json!(2));
+        assert_eq!(payload["budgets"]["schema_version"], json!(1));
+        assert_eq!(payload["rate_limits"]["schema_version"], json!(1));
         assert_eq!(payload["models"]["schema_version"], json!(0));
     }
 

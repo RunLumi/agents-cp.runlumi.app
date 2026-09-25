@@ -22,7 +22,7 @@ Last initialized: 2026-09-24
 | P02 | complete | frozen: `ba35fb6`; CR-001: `0290e68` | PASS: `docs/implementation/gates/P02-IG.md` | Real local identity/org/member/authz/audit slice and hostile smoke pass; browser capture follow-up documented |
 | P03 | complete | frozen: `p03-cg-v1` (PR #9; +P03-CR-001) | PASS: `docs/implementation/gates/P03-IG.md` | PR #11 (MOD/BE) + PR #14 (FE/QA) merged, hosted CI green; local smoke 17/17 |
 | P04 | review | frozen: `p04-cg-v1` (`57b2df9`) | conditional: `docs/implementation/gates/P04-IG.md` | P03 is merged and the combined P03/P04 smoke passes; P04 vertical slice, 131 Rust tests, Worker/WASM builds, hostile smoke, idempotency/health/policy extensions, authenticated desktop/narrow/editor captures, and handoffs pass; local downstream-disconnect delivery remains an explicit runtime follow-up |
-| P05 | in progress | frozen: `p05-cg-v1` (`b5a5ea8`) | pending | Contract Gate and 16 work packets defined; implementation and vertical control-loop smoke are next |
+| P05 | in progress | frozen: `p05-cg-v1` (`b5a5ea8`; CR-001/CR-002 accepted) | pending | Contract Gate, additive device/accounting clarifications, and 16 work packets defined; implementation and vertical control-loop smoke are next |
 | P06 | blocked | blocked | blocked | waits for P05 |
 | P07 | blocked | blocked | blocked | demand/dependency gated |
 | P08 | blocked | blocked | blocked | waits for integration foundations |
