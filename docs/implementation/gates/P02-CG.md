@@ -2,8 +2,8 @@
 
 - Phase: P02 — Identity, organizations, membership, authorization
 - Owner: P02 coordinator
-- State: frozen
-- Contract version: `p02-cg-v1`
+- State: frozen; additive authenticator amendment accepted
+- Contract version: `p02-cg-v2`
 - Inputs: Plan00, Plan02, F01–F05, F16, F23, ADR 0002/0004/0005, P01-CG `p01-cg-v1`, P01-IG PASS
 - Shared-file owner: P02 coordinator
 
@@ -109,3 +109,78 @@ P01 clients remain compatible: P01 errors, IDs, pagination, idempotency, and out
 - Contract Gate commit: `ba35fb6`; P02-CR-001 clarification merged at `0290e68` (`p02-cg-v1`).
 - Unlocked packets: P02-MOD-01..04, P02-BE-01..04, P02-FE-01..03, P02-INT-01, P02-QA-01.
 - Shared files: P02 coordinator owns manifests, Wrangler config, router, module declarations, and STATUS.
+
+
+## P02-CR-002 passkey-first authentication amendment
+
+P02-CR-002 was accepted at `1972339`.
+
+Authentication method priority is now a frozen product contract:
+
+1. **Passkey** is the primary/default registration and login option.
+2. **Email + password** is the secondary/fallback option.
+3. Existing email one-time-code login remains temporarily compatible for verification/recovery/migration but is not the target normal auth UI.
+
+The existing `Principal`, `LoginSession`, cookies, CSRF, organization context, authorization, and desktop PKCE handoff contracts do not change.
+
+### Additive API
+
+| Method | Path | Context | Success purpose |
+|---|---|---|---|
+| POST | `/auth/passkey/signup/start` | anonymous | short-lived WebAuthn registration ceremony |
+| POST | `/auth/passkey/signup/complete` | ceremony | verified account/passkey/session creation |
+| POST | `/auth/passkey/login/start` | anonymous | discoverable/usernameless assertion options |
+| POST | `/auth/passkey/login/complete` | ceremony | verified assertion + existing LoginSession |
+| POST | `/auth/password/signup` | anonymous | secondary password account creation |
+| POST | `/auth/password/login` | anonymous | secondary password login |
+| POST | `/auth/password/forgot` | anonymous | generic recovery start |
+| POST | `/auth/password/reset` | recovery challenge | reset password + session policy |
+| GET | `/account/passkeys` | session | passkey metadata |
+| POST | `/account/passkeys/register/start` | session + recent reauth | additional passkey ceremony |
+| POST | `/account/passkeys/register/complete` | session + ceremony | add passkey |
+| DELETE | `/account/passkeys/:passkey_id` | session + recent reauth | revoke passkey |
+| POST | `/account/password` | session + recent reauth | set/change fallback password |
+
+All paths are under `/api/v1`.
+
+### WebAuthn contract
+
+- registration creates a discoverable credential;
+- user verification is required;
+- normal login is usernameless and does not require email;
+- RP ID and allowed origins come from trusted configuration, not arbitrary Host input;
+- server stores one-time short-lived ceremony state;
+- challenge, RP ID/origin, credential signature/public key, user verification, and credential state are verified;
+- no manual home-grown WebAuthn crypto;
+- synced-passkey zero/non-incrementing counters are not treated as automatic compromise.
+
+### Password contract
+
+- password is secondary;
+- server stores only a slow password KDF result;
+- target is current OWASP Argon2id baseline or stronger after Worker/WASM compatibility benchmarking;
+- no fast raw hashing and no reversible password encryption;
+- no silent KDF weakening due runtime constraints;
+- generic login/reset responses where enumeration matters;
+- independent rate limiting;
+- long passwords/password-manager paste are supported.
+
+### Persistence skeleton
+
+Additive migrations may introduce:
+
+- `passkey_credentials`;
+- `webauthn_ceremonies`;
+- `password_credentials`;
+- narrowly scoped recovery state if existing auth challenges cannot safely represent it.
+
+Credential private keys/raw passwords are never persisted.
+
+### Follow-up packets
+
+- P02-MOD-05
+- P02-BE-05
+- P02-FE-04
+- P02-QA-02
+
+These packets are additive and may run without blocking P03/P04, provided shared auth files retain one coordinator owner.
