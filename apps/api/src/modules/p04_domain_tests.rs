@@ -2,14 +2,15 @@ use std::collections::BTreeSet;
 
 use super::catalog::{CatalogLifecycle, CatalogPolicy, ModelCapabilities, ModelCapability};
 use super::credentials::{
-    can_resolve_credential, CredentialMetadata, CredentialMode, CredentialOwnerType, CredentialStatus,
+    CredentialMetadata, CredentialMode, CredentialOwnerType, CredentialStatus,
+    can_resolve_credential,
 };
 use super::inference::{
     AdapterErrorKind, AdapterStreamState, InferenceRequest, ProviderStreamEvent, ResponseLifecycle,
     RetryController, SseDecoder,
 };
 use super::routing::{
-    select_candidates, HealthState, RouteCandidate, RouteConfig, RouteSelectionError, RouteStrategy,
+    HealthState, RouteCandidate, RouteConfig, RouteSelectionError, RouteStrategy, select_candidates,
 };
 
 fn id(prefix: &str, value: u8) -> String {
@@ -212,16 +213,8 @@ fn weighted_selection_is_deterministic_for_the_same_seed() {
 fn selector_rejects_unsafe_or_empty_route_configs() {
     let mut config = route_config();
     config.candidates.clear();
-    let error = select_candidates(
-        &config,
-        &[],
-        &[],
-        &CatalogPolicy::default(),
-        &[],
-        &[],
-        1,
-    )
-    .expect_err("empty route must be rejected");
+    let error = select_candidates(&config, &[], &[], &CatalogPolicy::default(), &[], &[], 1)
+        .expect_err("empty route must be rejected");
     assert_eq!(error, RouteSelectionError::NoCandidates);
 }
 
@@ -244,20 +237,15 @@ fn request() -> InferenceRequest {
 fn p04_permissions_extend_the_existing_matrix_without_handler_role_logic() {
     use crate::core::{MembershipId, OrganizationId, SessionId, UserId};
     use crate::modules::authorization::{
-        authorize, AuthorizationDecision, MembershipRole, MembershipSnapshot, MembershipStatus,
-        OrganizationContext, OrganizationState, Permission,
+        AuthorizationDecision, MembershipRole, MembershipSnapshot, MembershipStatus,
+        OrganizationContext, OrganizationState, Permission, authorize,
     };
     let org: OrganizationId = id("org", 1).parse().unwrap();
     let user: UserId = id("usr", 1).parse().unwrap();
     let membership_id: MembershipId = id("mem", 1).parse().unwrap();
     let session: SessionId = id("ses", 1).parse().unwrap();
-    let principal = crate::core::Principal::new(
-        user.clone(),
-        session,
-        "person@example.com",
-        "Person",
-        true,
-    );
+    let principal =
+        crate::core::Principal::new(user.clone(), session, "person@example.com", "Person", true);
     let organization = OrganizationContext {
         organization_id: org.clone(),
         state: OrganizationState::Active,
@@ -289,9 +277,7 @@ fn p04_permissions_extend_the_existing_matrix_without_handler_role_logic() {
             &Permission::CredentialsManage,
             None,
         ),
-        AuthorizationDecision::Deny(
-            crate::modules::authorization::DenyReason::PermissionDenied
-        )
+        AuthorizationDecision::Deny(crate::modules::authorization::DenyReason::PermissionDenied)
     );
 }
 
@@ -333,11 +319,28 @@ fn retry_controller_does_not_retry_after_meaningful_output() {
 fn sse_decoder_handles_split_chunks_and_emits_typed_events() {
     let mut decoder = SseDecoder::new();
     let mut state = AdapterStreamState::default();
-    let first = decoder.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n", &mut state);
-    assert!(matches!(first.as_slice(), [ProviderStreamEvent::TextDelta { .. }]));
-    let second = decoder.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\ndata: [DONE]\n\n", &mut state);
-    assert!(second.iter().any(|event| matches!(event, ProviderStreamEvent::TextDelta { .. })));
-    assert!(second.iter().any(|event| matches!(event, ProviderStreamEvent::Done)));
+    let first = decoder.push(
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n",
+        &mut state,
+    );
+    assert!(matches!(
+        first.as_slice(),
+        [ProviderStreamEvent::TextDelta { .. }]
+    ));
+    let second = decoder.push(
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\ndata: [DONE]\n\n",
+        &mut state,
+    );
+    assert!(
+        second
+            .iter()
+            .any(|event| matches!(event, ProviderStreamEvent::TextDelta { .. }))
+    );
+    assert!(
+        second
+            .iter()
+            .any(|event| matches!(event, ProviderStreamEvent::Done))
+    );
 }
 
 #[test]

@@ -10,7 +10,8 @@ use crate::{
     adapters::d1::D1Adapter,
     http::{json_body_limit, request_boundary},
     routes::{
-        account, auth, device_auth, foundation_checks, health::health, meta::meta, organizations,
+        account, auth, device_auth, devices, foundation_checks, health::health, meta::meta,
+        organizations, projects,
     },
 };
 
@@ -125,6 +126,65 @@ pub fn router(env: Env) -> Router {
             delete(organizations::remove_team_member),
         )
         .route("/api/v1/orgs/{org_id}/audit", get(organizations::audit))
+        .route("/api/v1/orgs/{org_id}/policy", get(projects::org_policy))
+        .route("/api/v1/orgs/{org_id}/devices", get(devices::list_devices))
+        .route(
+            "/api/v1/orgs/{org_id}/devices/{device_id}",
+            get(devices::get_device).delete(devices::revoke_device),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/devices/enrollments/{enrollment_id}/approve",
+            post(devices::approve_enrollment),
+        )
+        .route(
+            "/api/v1/devices/enrollments",
+            post(devices::begin_enrollment),
+        )
+        .route(
+            "/api/v1/devices/enrollments/{enrollment_id}",
+            get(devices::enrollment_status),
+        )
+        .route(
+            "/api/v1/devices/enrollments/{enrollment_id}/complete",
+            post(devices::complete_enrollment),
+        )
+        .route("/api/v1/devices/token/nonce", get(devices::token_nonce))
+        .route("/api/v1/devices/token", post(devices::refresh_token))
+        .route("/api/v1/devices/heartbeat", post(devices::heartbeat))
+        .route("/api/v1/devices/policy", get(devices::fetch_policy))
+        .route("/api/v1/devices/policy/ack", post(devices::ack_policy))
+        .route(
+            "/api/v1/devices/bindings",
+            get(devices::list_device_bindings).post(devices::create_binding),
+        )
+        .route(
+            "/api/v1/devices/bindings/{binding_id}",
+            delete(devices::delete_device_binding),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/projects",
+            get(projects::list_projects).post(projects::create_project),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/projects/{project_id}",
+            get(projects::get_project).patch(projects::patch_project),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/projects/{project_id}/access",
+            get(projects::list_grants).post(projects::create_grant),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/projects/{project_id}/access/{grant_id}",
+            delete(projects::delete_grant),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/projects/{project_id}/bindings",
+            get(projects::list_project_bindings),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/projects/{project_id}/bindings/{binding_id}",
+            delete(projects::delete_project_binding),
+        )
         .route("/api/v1/account/sessions", get(account::sessions))
         .route(
             "/api/v1/account/sessions/revoke-all",

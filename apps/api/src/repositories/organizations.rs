@@ -327,6 +327,13 @@ struct TeamRow {
     updated_at: String,
 }
 
+const ORG_BY_SLUG_SQL: &str = r#"
+SELECT org_id, display_name, slug, state, version, created_by_user_id, created_at, updated_at
+FROM organizations
+WHERE slug = ?1
+LIMIT 1
+"#;
+
 pub struct OrganizationRepository<'a> {
     database: &'a D1Adapter,
 }
@@ -393,6 +400,17 @@ impl<'a> OrganizationRepository<'a> {
         self.find_organization(org_id).await?.ok_or_else(|| {
             worker::Error::RustError("created organization could not be read".into())
         })
+    }
+
+    /// Public slug lookup for unauthenticated device enrollment begins.
+    pub async fn find_organization_by_slug(
+        &self,
+        slug: &str,
+    ) -> worker::Result<Option<OrganizationRecord>> {
+        let statement = self
+            .database
+            .prepare(ORG_BY_SLUG_SQL, &[BindValue::Text(slug)])?;
+        statement.first::<OrganizationRecord>(None).await
     }
 
     pub async fn find_organization(

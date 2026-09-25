@@ -146,6 +146,14 @@ resource_id_type!(DeviceAuthorizationId, InvalidResourceId, Some("dev"));
 resource_id_type!(SecurityEventId, InvalidResourceId, Some("sec"));
 resource_id_type!(DeviceId, InvalidResourceId, Some("dev"));
 resource_id_type!(SessionId, InvalidResourceId, Some("ses"));
+// P03-CG (p03-cg-v1) freezes the device/project/policy prefixes. `dev_` keeps
+// its P02 device-authorization meaning; managed devices are `dvc_`.
+resource_id_type!(ManagedDeviceId, InvalidResourceId, Some("dvc"));
+resource_id_type!(DeviceEnrollmentId, InvalidResourceId, Some("enr"));
+resource_id_type!(ProjectId, InvalidResourceId, Some("prj"));
+resource_id_type!(WorkspaceBindingId, InvalidResourceId, Some("wsb"));
+resource_id_type!(PolicySnapshotId, InvalidResourceId, Some("pol"));
+resource_id_type!(PolicyAckId, InvalidResourceId, Some("pak"));
 // P04 catalog, credential, route, and usage identifiers.
 resource_id_type!(ProviderId, InvalidResourceId, Some("prv"));
 resource_id_type!(ProviderEndpointId, InvalidResourceId, Some("pe"));

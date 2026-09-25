@@ -231,7 +231,10 @@ pub fn validate_provider(provider: &ProviderDescriptor) -> Result<(), CatalogVal
     if provider.display_name.trim().is_empty() || provider.display_name.chars().count() > 160 {
         return Err(CatalogValidationError::EmptyDisplayName);
     }
-    if !matches!(provider.adapter.as_str(), "openai_compatible" | "anthropic" | "mock") {
+    if !matches!(
+        provider.adapter.as_str(),
+        "openai_compatible" | "anthropic" | "mock"
+    ) {
         return Err(CatalogValidationError::InvalidAdapter);
     }
     if let Some(endpoint) = &provider.endpoint_url
@@ -261,10 +264,7 @@ pub fn validate_model(model: &ModelDescriptor) -> Result<(), CatalogValidationEr
     Ok(())
 }
 
-pub fn model_satisfies(
-    model: &ModelDescriptor,
-    required_capabilities: &[ModelCapability],
-) -> bool {
+pub fn model_satisfies(model: &ModelDescriptor, required_capabilities: &[ModelCapability]) -> bool {
     model.lifecycle.allows_new_routes() && model.capabilities.contains_all(required_capabilities)
 }
 
@@ -278,8 +278,14 @@ mod tests {
 
     #[test]
     fn capability_round_trips_through_wire_names() {
-        assert_eq!(ModelCapability::parse("structured_output"), Some(ModelCapability::StructuredOutput));
-        assert_eq!(serde_json::to_string(&ModelCapability::Tools).unwrap(), "\"tools\"");
+        assert_eq!(
+            ModelCapability::parse("structured_output"),
+            Some(ModelCapability::StructuredOutput)
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelCapability::Tools).unwrap(),
+            "\"tools\""
+        );
         assert!(ModelCapability::parse("unknown").is_none());
     }
 

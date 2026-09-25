@@ -22,6 +22,7 @@ P01/P02 opaque ID conventions remain authoritative (`<prefix>_<32 lowercase hex>
 - `WorkspaceBinding`: `(device_id, workspace_identity)` is unique among live bindings; `workspace_identity` is a stable normalized local identifier plus non-secret display name (F07-007); `environment_type` ∈ `local|ssh|wsl|docker|remote`. Binding is always explicit (F26-002); a binding whose device belongs to a different org than the project is rejected with `resource_scope_mismatch`.
 - `PolicySnapshot`: org-scoped, monotonically increasing integer `policy_version`; immutable rows carry `issued_at`, `expires_at` (default 24 h), and a payload envelope with typed sections: `org_access`, `projects`, `min_client_version` (P03-owned), and `models`, `tools`, `automation`, `entitlements` as opaque versioned placeholders owned by P04/P05. Audience binding = the fetching device's token; the `signature` field is reserved (`null`) — integrity relies on authenticated transport plus device-token binding (F19-005 option). Policy for Org A is never served to a device of Org B.
 - `PolicyAck`: unique `(device_id, policy_version)`; acks are recorded for sync-status visibility.
+- Org minimum client version (F19-008) is stored per org in `org_device_policy_settings` (nullable; `NULL` disables the check) and is enforced by the device token exchange (P03-CR-001).
 - Heartbeat updates `devices.last_seen_at` and optionally the bounded capability report (F19-003/F19-009); heartbeats are not audited and are rate-bounded by normal update semantics.
 
 ## Central authorization
@@ -30,7 +31,7 @@ Protected org routes keep using the P02 `authorize()` decision service. P03 appe
 
 Role mapping (additive to P02 matrix): Owner = all P03 permissions; Admin = all P03 permissions; Member = `projects.read`, `devices.read` (org-visible devices/projects) plus self-service actions (approve own enrollment, revoke own enrolled device, manage own device tokens/bindings); Viewer = `projects.read`, `devices.read`. Restricted-project reads additionally require an explicit `ProjectAccessGrant` (member or team) for non-managers.
 
-New stable denial/lifecycle reasons appended to the P02 registry in `error.details.reason`: `device_not_found`, `device_revoked`, `enrollment_expired`, `enrollment_denied`, `device_token_expired`, `device_proof_invalid`, `client_version_too_old`, `project_archived`, `workspace_binding_conflict`, `device_not_approved`. Existing P01 error codes are unchanged (`validation_failed` 422, `idempotency_conflict`, `permission_denied`, `authentication_required`, …).
+New stable denial/lifecycle reasons appended to the P02 registry in `error.details.reason`: `device_not_found`, `device_revoked`, `enrollment_expired`, `enrollment_denied`, `device_token_expired`, `device_proof_invalid`, `client_version_too_old`, `project_archived`, `workspace_binding_conflict`, `device_not_approved`, plus `device_fingerprint_conflict` and `project_slug_conflict` added by `change-requests/P03-CR-001` (duplicate key fingerprint or project slug are distinct user errors, not transport retries). Existing P01 error codes are unchanged (`validation_failed` 422, `idempotency_conflict`, `permission_denied`, `authentication_required`, …).
 
 ## API
 
@@ -77,7 +78,7 @@ Immutable `security_events` append for: enrollment approved (`device.enrolled.v1
 
 ## Persistence
 
-Migration `0007_p03_devices_projects_policy.sql` creates: `devices`, `device_enrollments`, `device_tokens`, `projects`, `project_access_grants`, `workspace_bindings`, `policy_snapshots`, `policy_acks`. All tenant rows carry `org_id`. Invariant-bearing uniqueness: `(org_id, key_fingerprint)` on devices, `(org_id, slug)` on projects, `(device_id, workspace_identity)` on workspace bindings, `(device_id, policy_version)` on policy acks, `(org_id, policy_version)` on policy snapshots. State CHECK constraints, explicit indexes per P01 naming, D1 batches for invariant-bearing mutations (approve+device insert, revoke+token invalidation, project mutations with version predicate). No KV cache, no Durable Objects.
+Migration `0007_p03_devices_projects_policy.sql` creates: `devices`, `device_enrollments`, `device_tokens`, `projects`, `project_access_grants`, `workspace_bindings`, `policy_snapshots`, `policy_acks`, and `org_device_policy_settings`. All tenant rows carry `org_id`. Invariant-bearing uniqueness: `(org_id, key_fingerprint)` on devices, `(org_id, slug)` on projects, `(device_id, workspace_identity)` on workspace bindings, `(device_id, policy_version)` on policy acks, `(org_id, policy_version)` on policy snapshots. State CHECK constraints, explicit indexes per P01 naming, D1 batches for invariant-bearing mutations (approve+device insert, revoke+token invalidation, project mutations with version predicate). No KV cache, no Durable Objects.
 
 ## Compatibility
 

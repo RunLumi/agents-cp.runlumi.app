@@ -201,7 +201,10 @@ pub fn mask_fingerprint(fingerprint: &str) -> String {
     if fingerprint.len() <= 8 {
         return "••••".to_owned();
     }
-    format!("••••{}", &fingerprint[fingerprint.len().saturating_sub(4)..])
+    format!(
+        "••••{}",
+        &fingerprint[fingerprint.len().saturating_sub(6)..]
+    )
 }
 
 #[cfg(test)]

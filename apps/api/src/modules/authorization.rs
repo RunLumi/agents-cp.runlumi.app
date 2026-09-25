@@ -109,6 +109,11 @@ pub enum Permission {
     TeamsRead,
     TeamsManage,
     AuditRead,
+    // P03-CG (p03-cg-v1): managed devices, projects, and policy visibility.
+    DevicesRead,
+    DevicesManage,
+    ProjectsRead,
+    ProjectsManage,
     ModelsRead,
     ModelsManage,
     CredentialsRead,
@@ -133,6 +138,10 @@ impl Permission {
             "teams.read" => Self::TeamsRead,
             "teams.manage" => Self::TeamsManage,
             "audit.read" => Self::AuditRead,
+            "devices.read" => Self::DevicesRead,
+            "devices.manage" => Self::DevicesManage,
+            "projects.read" => Self::ProjectsRead,
+            "projects.manage" => Self::ProjectsManage,
             "models.read" => Self::ModelsRead,
             "models.manage" => Self::ModelsManage,
             "credentials.read" => Self::CredentialsRead,
@@ -157,6 +166,10 @@ impl Permission {
             Self::TeamsRead => "teams.read",
             Self::TeamsManage => "teams.manage",
             Self::AuditRead => "audit.read",
+            Self::DevicesRead => "devices.read",
+            Self::DevicesManage => "devices.manage",
+            Self::ProjectsRead => "projects.read",
+            Self::ProjectsManage => "projects.manage",
             Self::ModelsRead => "models.read",
             Self::ModelsManage => "models.manage",
             Self::CredentialsRead => "credentials.read",
@@ -176,6 +189,8 @@ impl Permission {
                 | Self::MembersRead
                 | Self::TeamsRead
                 | Self::AuditRead
+                | Self::DevicesRead
+                | Self::ProjectsRead
                 | Self::ModelsRead
                 | Self::RoutesRead
                 | Self::UsageRead
@@ -366,6 +381,10 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::TeamsRead
                 | Permission::TeamsManage
                 | Permission::AuditRead
+                | Permission::DevicesRead
+                | Permission::DevicesManage
+                | Permission::ProjectsRead
+                | Permission::ProjectsManage
                 | Permission::ModelsRead
                 | Permission::ModelsManage
                 | Permission::CredentialsRead
@@ -381,6 +400,8 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::OrgLeave
                 | Permission::MembersRead
                 | Permission::TeamsRead
+                | Permission::DevicesRead
+                | Permission::ProjectsRead
                 | Permission::ModelsRead
                 | Permission::RoutesRead
                 | Permission::InferenceUse
@@ -393,6 +414,8 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::MembersRead
                 | Permission::TeamsRead
                 | Permission::AuditRead
+                | Permission::DevicesRead
+                | Permission::ProjectsRead
                 | Permission::ModelsRead
                 | Permission::RoutesRead
         ),

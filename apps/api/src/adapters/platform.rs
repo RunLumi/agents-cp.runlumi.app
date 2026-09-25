@@ -20,6 +20,34 @@ export async function lumiSha256Hex(value) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+// P03 device proof-of-possession: verify an Ed25519 signature over the
+// server challenge with the enrolled public key (PEM SPKI). The raw
+// signature and challenge are never persisted; only the verdict is used.
+export async function lumiVerifyDeviceProof(publicKeyPem, signatureHex, message) {
+  const base64Body = publicKeyPem
+    .replace(/-----BEGIN PUBLIC KEY-----/, "")
+    .replace(/-----END PUBLIC KEY-----/, "")
+    .replace(/\s+/g, "");
+  const binaryKey = atob(base64Body);
+  const keyBytes = new Uint8Array(binaryKey.length);
+  for (let index = 0; index < binaryKey.length; index += 1) {
+    keyBytes[index] = binaryKey.charCodeAt(index);
+  }
+  const signatureBytes = new Uint8Array(signatureHex.length / 2);
+  for (let index = 0; index < signatureBytes.length; index += 1) {
+    signatureBytes[index] = parseInt(signatureHex.slice(index * 2, index * 2 + 2), 16);
+  }
+  const key = await globalThis.crypto.subtle.importKey(
+    "spki",
+    keyBytes,
+    { name: "Ed25519" },
+    false,
+    ["verify"],
+  );
+  const messageBytes = new TextEncoder().encode(message);
+  return globalThis.crypto.subtle.verify({ name: "Ed25519" }, key, signatureBytes, messageBytes);
+}
+
 export function lumiAddIdempotencyTtl(value) {
   return new Date(Date.parse(value) + 24 * 60 * 60 * 1000).toISOString();
 }
@@ -37,6 +65,13 @@ extern "C" {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = lumiSha256Hex)]
     fn sha256_hex_js(value: &str) -> worker::js_sys::Promise;
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = lumiVerifyDeviceProof)]
+    fn verify_device_proof_js(
+        public_key_pem: &str,
+        signature_hex: &str,
+        message: &str,
+    ) -> worker::js_sys::Promise;
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = lumiAddIdempotencyTtl)]
     fn add_idempotency_ttl_js(value: &str) -> String;
@@ -87,6 +122,26 @@ pub async fn sha256_hex(value: &str) -> worker::Result<String> {
     value
         .as_string()
         .ok_or_else(|| worker::Error::RustError("Worker SHA-256 result was invalid".to_owned()))
+}
+
+/// Verify a device proof-of-possession signature (Ed25519 over the stored
+/// challenge) with the enrolled public key via Worker WebCrypto.
+#[cfg(target_arch = "wasm32")]
+pub async fn verify_device_proof(
+    public_key_pem: &str,
+    signature_hex: &str,
+    message: &str,
+) -> worker::Result<bool> {
+    use wasm_bindgen_futures::JsFuture;
+
+    let verdict = JsFuture::from(verify_device_proof_js(
+        public_key_pem,
+        signature_hex,
+        message,
+    ))
+    .await
+    .map_err(|_| worker::Error::RustError("Worker Ed25519 verify failed".to_owned()))?;
+    Ok(verdict.as_bool().unwrap_or(false))
 }
 
 /// Expiry uses exactly 24 hours from the trusted Worker clock and preserves
@@ -144,6 +199,17 @@ pub async fn sha256_hex(_value: &str) -> worker::Result<String> {
 pub fn add_idempotency_ttl(_now: &Timestamp) -> worker::Result<Timestamp> {
     Err(worker::Error::RustError(
         "Worker clock is unavailable in host tests".to_owned(),
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn verify_device_proof(
+    _public_key_pem: &str,
+    _signature_hex: &str,
+    _message: &str,
+) -> worker::Result<bool> {
+    Err(worker::Error::RustError(
+        "Worker Web Crypto is unavailable in host tests".to_owned(),
     ))
 }
 

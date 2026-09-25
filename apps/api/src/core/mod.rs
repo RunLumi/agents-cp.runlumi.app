@@ -22,9 +22,11 @@ pub use idempotency::{
 };
 pub use identifiers::{
     ActorId, BudgetId, BudgetReservationId, CorrelationId, CredentialId, DeviceAuthorizationId,
-    DeviceId, EventId, IdentityId, InvitationId, MembershipId, ModelAliasId, ModelId,
-    OrganizationId, ProviderEndpointId, ProviderId, ReauthenticationGrantId, RequestId, ResourceId,
-    RouteId, RouteVersionId, SecurityEventId, SessionId, TeamId, TeamMemberId, UsageEventId, UserId,
+    DeviceEnrollmentId, DeviceId, EventId, IdentityId, InvitationId, ManagedDeviceId, MembershipId,
+    ModelAliasId, ModelId, OrganizationId, PolicyAckId, PolicySnapshotId, ProjectId,
+    ProviderEndpointId, ProviderId, ReauthenticationGrantId, RequestId, ResourceId, RouteId,
+    RouteVersionId, SecurityEventId, SessionId, TeamId, TeamMemberId, UsageEventId, UserId,
+    WorkspaceBindingId,
 };
 pub use pagination::{Cursor, Page};
 pub use principal::Principal;

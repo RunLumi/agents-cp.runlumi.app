@@ -9,9 +9,7 @@ use crate::{
         ActorContext, ActorId, ApiError, ApiErrorCode, EventEnvelope, EventType, OrganizationId,
         Principal, RequestContext,
     },
-    repositories::{
-        OutboxRepository, SecurityEventInput, SecurityEventRepository, UserRecord,
-    },
+    repositories::{OutboxRepository, SecurityEventInput, SecurityEventRepository, UserRecord},
     routes::errors,
 };
 
@@ -158,7 +156,11 @@ pub fn security_event_statement<'a>(
     let input = SecurityEventInput {
         event_id,
         organization_id,
-        actor_type: if principal.is_some() { "user" } else { "system" },
+        actor_type: if principal.is_some() {
+            "user"
+        } else {
+            "system"
+        },
         actor_id: principal.map(|value| value.user_id.as_str()),
         effective_user_id: principal.map(|value| value.user_id.as_str()),
         session_id: principal.map(|value| value.session_id.as_str()),

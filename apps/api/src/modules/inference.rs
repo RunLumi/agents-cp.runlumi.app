@@ -138,10 +138,19 @@ pub struct ProviderUsage {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProviderStreamEvent {
-    TextDelta { text: String },
-    ToolCallDelta { call_id: String, arguments_delta: String },
-    Usage { usage: ProviderUsage },
-    ProviderRequestId { provider_request_id: String },
+    TextDelta {
+        text: String,
+    },
+    ToolCallDelta {
+        call_id: String,
+        arguments_delta: String,
+    },
+    Usage {
+        usage: ProviderUsage,
+    },
+    ProviderRequestId {
+        provider_request_id: String,
+    },
     Done,
     InvalidResponse,
 }
@@ -166,7 +175,11 @@ impl SseDecoder {
     /// Decode complete SSE events while retaining a bounded partial event for
     /// the next network chunk. Malformed provider data is represented as a
     /// typed event and never forwarded as a raw body.
-    pub fn push(&mut self, bytes: &[u8], state: &mut AdapterStreamState) -> Vec<ProviderStreamEvent> {
+    pub fn push(
+        &mut self,
+        bytes: &[u8],
+        state: &mut AdapterStreamState,
+    ) -> Vec<ProviderStreamEvent> {
         if state.done || bytes.len() > 256 * 1024 {
             state.invalid_response = true;
             return vec![ProviderStreamEvent::InvalidResponse];
@@ -246,14 +259,23 @@ fn decode_openai_value(value: &Value, state: &mut AdapterStreamState) -> Vec<Pro
     if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {
         events.push(ProviderStreamEvent::Usage {
             usage: ProviderUsage {
-                input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64).and_then(|v| u32::try_from(v).ok()),
-                output_tokens: usage.get("completion_tokens").and_then(Value::as_u64).and_then(|v| u32::try_from(v).ok()),
+                input_tokens: usage
+                    .get("prompt_tokens")
+                    .and_then(Value::as_u64)
+                    .and_then(|v| u32::try_from(v).ok()),
+                output_tokens: usage
+                    .get("completion_tokens")
+                    .and_then(Value::as_u64)
+                    .and_then(|v| u32::try_from(v).ok()),
                 cached_tokens: usage
                     .get("prompt_tokens_details")
                     .and_then(|details| details.get("cached_tokens"))
                     .and_then(Value::as_u64)
                     .and_then(|v| u32::try_from(v).ok()),
-                provider_name: value.get("model").and_then(Value::as_str).map(str::to_owned),
+                provider_name: value
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
                 pricing_version: None,
             },
         });
@@ -384,9 +406,19 @@ mod tests {
     fn partial_sse_event_is_retained_until_complete() {
         let mut decoder = SseDecoder::new();
         let mut state = AdapterStreamState::default();
-        assert!(decoder.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}", &mut state).is_empty());
+        assert!(
+            decoder
+                .push(
+                    b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}",
+                    &mut state
+                )
+                .is_empty()
+        );
         let events = decoder.push(b"\n\n", &mut state);
-        assert!(matches!(events.as_slice(), [ProviderStreamEvent::TextDelta { .. }]));
+        assert!(matches!(
+            events.as_slice(),
+            [ProviderStreamEvent::TextDelta { .. }]
+        ));
     }
 
     #[test]

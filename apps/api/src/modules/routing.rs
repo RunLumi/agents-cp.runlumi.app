@@ -7,8 +7,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::catalog::{
-    model_satisfies, provider_satisfies, CatalogLifecycle, CatalogPolicy, ModelCapability,
-    ModelDescriptor, ProviderDescriptor,
+    CatalogLifecycle, CatalogPolicy, ModelCapability, ModelDescriptor, ProviderDescriptor,
+    model_satisfies, provider_satisfies,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,9 +67,17 @@ pub struct SelectedCandidate {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum HealthState {
-    Ready { provider_id: String },
-    CoolingDown { provider_id: String, cooldown_until: String },
-    Degraded { provider_id: String, last_error: String },
+    Ready {
+        provider_id: String,
+    },
+    CoolingDown {
+        provider_id: String,
+        cooldown_until: String,
+    },
+    Degraded {
+        provider_id: String,
+        last_error: String,
+    },
 }
 
 impl HealthState {
@@ -246,7 +254,10 @@ mod tests {
             strategy: RouteStrategy::OrderedFallback,
             candidates: vec![candidate("p", "m", 1), candidate("p", "m", 1)],
         };
-        assert_eq!(validate_route_config(&config), Err(RouteSelectionError::InvalidConfig));
+        assert_eq!(
+            validate_route_config(&config),
+            Err(RouteSelectionError::InvalidConfig)
+        );
     }
 
     #[test]
