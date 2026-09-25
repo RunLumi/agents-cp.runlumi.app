@@ -34,7 +34,7 @@ import { DataPolicyEditor } from "./data-policy";
 import { OrgDeletionWorkflow, PersonalDeletionWorkflow } from "./deletion-workflows";
 import { OrgExportWorkflow, PersonalExportWorkflow } from "./export-workflows";
 import { RetentionSummary } from "./retention-summary";
-import { ErrorNotice, LoadingRows, PermissionState, Pill, Surface } from "./ui";
+import { ErrorNotice, LoadingRows, Notice, PermissionState, Pill, Surface } from "./ui";
 
 type LoadState<T> =
   | { kind: "loading" }
@@ -43,7 +43,18 @@ type LoadState<T> =
   | { kind: "permission" };
 
 const EMPTY_EXPORT_PAGE: Page<ExportJob> = { items: [], next_cursor: null, has_more: false };
-const EMPTY_DELETION_PAGE: Page<DeletionJob> = { items: [], next_cursor: null, has_more: false };
+
+/**
+ * Why the policy can be unreadable while the job surfaces are not.
+ *
+ * The frozen gate gives deletion-job status and resume an explicit lifecycle
+ * exception, so a `pending_deletion` organization still answers those two while
+ * every other permission is denied. Saying so is the difference between an
+ * operator who can finish their deletion and one who thinks the workflow is
+ * gone.
+ */
+export const POLICY_UNAVAILABLE_REASON =
+  "An organization that is being deleted is fenced for new work, so its policy and retention settings are refused. Deletion job status and resume stay available, and they are shown below: a pending deletion is not a missing record.";
 
 export interface OrgMembershipSummary {
   org_id: string;
@@ -217,7 +228,7 @@ export function DataPanel({
     );
   }
 
-  if (policy.kind === "loading") {
+  if (policy.kind === "loading" && exports.kind === "loading" && deletions.kind === "loading") {
     return (
       <section aria-label="Data and retention" className="space-y-5">
         <PanelHeading stale={false} refreshing={refreshing} onRefresh={() => void load()} />
@@ -231,114 +242,135 @@ export function DataPanel({
     );
   }
 
-  if (policy.kind === "error" && policy.previous === null) {
+  const currentPolicy =
+    policy.kind === "ready" ? policy.data : policy.kind === "error" ? policy.previous : null;
+  const policyStale = policy.kind === "ready" ? policy.stale : policy.kind === "error";
+  const exportPage =
+    exports.kind === "ready"
+      ? exports.data
+      : exports.kind === "error" && exports.previous !== null
+        ? exports.previous
+        : null;
+  const deletionPage =
+    deletions.kind === "ready"
+      ? deletions.data
+      : deletions.kind === "error" && deletions.previous !== null
+        ? deletions.previous
+        : null;
+
+  // Nothing at all is readable. Show one stated failure rather than three.
+  if (currentPolicy === null && exportPage === null && deletionPage === null) {
     return (
       <section aria-label="Data and retention" className="space-y-5">
         <PanelHeading stale={false} refreshing={refreshing} onRefresh={() => void load()} />
         <Surface ariaLabel="Data policy">
           <div className="p-5">
-            <ErrorNotice error={policy.error} onRetry={() => void load()} />
+            <ErrorNotice
+              error={policy.kind === "error" ? policy.error : null}
+              onRetry={() => void load()}
+            />
           </div>
         </Surface>
       </section>
     );
   }
 
-  const currentPolicy = policy.kind === "error" ? policy.previous : policy.data;
-  if (currentPolicy === null) return null;
-
-  const exportPage =
-    exports.kind === "ready"
-      ? exports.data
-      : exports.kind === "error" && exports.previous !== null
-        ? exports.previous
-        : EMPTY_EXPORT_PAGE;
-  const deletionPage =
-    deletions.kind === "ready"
-      ? deletions.data
-      : deletions.kind === "error" && deletions.previous !== null
-        ? deletions.previous
-        : EMPTY_DELETION_PAGE;
-
   return (
     <section aria-label="Data and retention" className="space-y-5">
       <PanelHeading
-        stale={
-          policy.kind === "error" ||
-          policy.stale ||
-          exports.kind === "error" ||
-          deletions.kind === "error"
-        }
+        stale={policyStale || exports.kind === "error" || deletions.kind === "error"}
         refreshing={refreshing}
         onRefresh={() => void load()}
       />
 
       {policy.kind === "error" ? (
-        <ErrorNotice
-          error={policy.error}
-          title="The data policy could not be refreshed"
-          onRetry={() => void load()}
+        <div className="space-y-3">
+          <ErrorNotice
+            error={policy.error}
+            title="The data policy could not be read"
+            onRetry={() => void load()}
+          />
+          {currentPolicy === null ? (
+            <Notice tone="warning">
+              <p className="font-semibold">The policy and retention settings are unavailable.</p>
+              <p className="mt-1">{POLICY_UNAVAILABLE_REASON}</p>
+            </Notice>
+          ) : null}
+        </div>
+      ) : null}
+
+      {currentPolicy !== null ? (
+        <>
+          <DataPolicyEditor
+            orgId={orgId}
+            api={client}
+            policy={currentPolicy}
+            status={policyStale ? "stale" : "ready"}
+            onRefresh={() => void load()}
+            onSaved={(next) => setPolicy({ kind: "ready", data: next, stale: false })}
+            {...(currentUserId === undefined ? {} : { currentUserId })}
+            canManage={canManage}
+          />
+
+          <RetentionSummary policy={currentPolicy} />
+        </>
+      ) : null}
+
+      {exportPage !== null ? (
+        <OrgExportWorkflow
+          orgId={orgId}
+          api={client}
+          legalHold={currentPolicy?.legal_hold ?? false}
+          canExport={canExport}
+          page={exportPage}
+          status={
+            exports.kind === "loading" ? "loading" : exports.kind === "error" ? "error" : "ready"
+          }
+          error={exports.kind === "error" ? exports.error : null}
+          refreshing={refreshing}
+          onRefresh={() => void load()}
+          onLoadMore={() => void loadMoreExports()}
+          onCreated={(job) =>
+            setExports((current) =>
+              current.kind === "ready"
+                ? { kind: "ready", data: prepend(current.data, job), stale: false }
+                : current,
+            )
+          }
         />
       ) : null}
 
-      <DataPolicyEditor
-        orgId={orgId}
-        api={client}
-        policy={currentPolicy}
-        status={policy.kind === "error" ? "stale" : policy.stale ? "stale" : "ready"}
-        onRefresh={() => void load()}
-        onSaved={(next) => setPolicy({ kind: "ready", data: next, stale: false })}
-        {...(currentUserId === undefined ? {} : { currentUserId })}
-        canManage={canManage}
-      />
-
-      <RetentionSummary policy={currentPolicy} />
-
-      <OrgExportWorkflow
-        orgId={orgId}
-        api={client}
-        legalHold={currentPolicy.legal_hold}
-        canExport={canExport}
-        page={exportPage}
-        status={
-          exports.kind === "loading" ? "loading" : exports.kind === "error" ? "error" : "ready"
-        }
-        error={exports.kind === "error" ? exports.error : null}
-        refreshing={refreshing}
-        onRefresh={() => void load()}
-        onLoadMore={() => void loadMoreExports()}
-        onCreated={(job) =>
-          setExports((current) =>
-            current.kind === "ready"
-              ? { kind: "ready", data: prepend(current.data, job), stale: false }
-              : current,
-          )
-        }
-      />
-
-      <OrgDeletionWorkflow
-        orgId={orgId}
-        api={client}
-        page={deletionPage}
-        detail={detail?.job ?? null}
-        detailStatus={detail === null ? "idle" : detail.status}
-        detailError={detail?.error ?? null}
-        status={
-          deletions.kind === "loading" ? "loading" : deletions.kind === "error" ? "error" : "ready"
-        }
-        error={deletions.kind === "error" ? deletions.error : null}
-        refreshing={refreshing}
-        canDelete={canDelete}
-        onRefresh={() => void load()}
-        onLoadMore={() => void loadMoreDeletions()}
-        onSelect={(deletionId) => void loadDetail(deletionId)}
-        onResumed={(job) =>
-          setDetail((current) =>
-            current === null ? current : { ...current, status: "ready", job, error: null },
-          )
-        }
-        {...(onRequestOrganizationDeletion === undefined ? {} : { onRequestOrganizationDeletion })}
-      />
+      {deletionPage !== null ? (
+        <OrgDeletionWorkflow
+          orgId={orgId}
+          api={client}
+          page={deletionPage}
+          detail={detail?.job ?? null}
+          detailStatus={detail === null ? "idle" : detail.status}
+          detailError={detail?.error ?? null}
+          status={
+            deletions.kind === "loading"
+              ? "loading"
+              : deletions.kind === "error"
+                ? "error"
+                : "ready"
+          }
+          error={deletions.kind === "error" ? deletions.error : null}
+          refreshing={refreshing}
+          canDelete={canDelete}
+          onRefresh={() => void load()}
+          onLoadMore={() => void loadMoreDeletions()}
+          onSelect={(deletionId) => void loadDetail(deletionId)}
+          onResumed={(job) =>
+            setDetail((current) =>
+              current === null ? current : { ...current, status: "ready", job, error: null },
+            )
+          }
+          {...(onRequestOrganizationDeletion === undefined
+            ? {}
+            : { onRequestOrganizationDeletion })}
+        />
+      ) : null}
 
       {exports.kind === "error" ? (
         <ErrorNotice
