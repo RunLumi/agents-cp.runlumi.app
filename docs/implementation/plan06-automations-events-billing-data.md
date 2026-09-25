@@ -190,4 +190,30 @@ Demonstrate:
 - event/webhook emitted and retryable;
 - entitlement change takes effect without client redeploy;
 - export produces short-lived artifact;
-- deletion workflow is auditable and idempotent.
+- deletion workflow is auditable and idempotent;
+- local work is not unnecessarily bricked by a transient billing outage.
+
+## 9. Progress log
+
+### Schema foundation (coordinator)
+
+Migrations `0011`–`0014` are written and apply cleanly to a fresh D1
+(`wrangler d1 migrations apply ... --local`: 14/14 ✅, 37 new P06 tables, plus
+the additive `runs.automation_occurrence_id` / `runs.automation_lease_id`
+correlation columns).
+
+Frozen invariants proven against a real D1 instance:
+
+| # | Invariant | Probe | Result |
+|---|---|---|---|
+| 1 | One active lease per occurrence (P06-CR-001) | Two devices insert an `active` lease for the same `occurrence_id` with different attempts | 2nd rejected by `ux_automation_leases_active`; active count = 1 |
+| 2 | One logical occurrence per schedule slot | Two different `occurrence_id`s for the same `(automation_id, schedule_rule_id, scheduled_for_utc)` | 2nd rejected by `ux_automation_occurrences_scheduled` |
+| 3 | No provider product/price ID as an entitlement key (P06-CR-002) | `INSERT entitlement_definitions(entitlement_key='price_abc123')` | Rejected by `trg_entitlement_definitions_no_provider_id` |
+| 4 | No silent forever internal override (F18) | `INSERT entitlement_grants(source='internal_override')` without `expires_at`/`reason`/`granted_by` | Rejected by CHECK constraint |
+| 5 | Mandatory security notifications cannot be opted out (F17) | `INSERT notification_preferences(disabled_event_types_json='["auth.*"]')` | Rejected by `trg_notification_preferences_no_security_optout` |
+| 6 | No wildcard webhook subscriptions (F17) | `INSERT webhook_endpoints(subscribed_event_types_json='["*"]')` | Rejected by `trg_webhook_endpoints_no_wildcard` |
+| 7 | Lumi never claims upstream-provider deletion (F20) | `INSERT deletion_tasks(reference_kind='upstream_provider_data', state='succeeded')` | Rejected by `trg_deletion_tasks_provider_external` |
+| 8 | No recursive webhook fan-out | `INSERT webhook_deliveries(event_type='webhook.delivery_*')` | Rejected by `trg_webhook_deliveries_no_recursive_fanout` |
+
+Lease tokens are stored only as SHA-256 fingerprints; no plaintext secret,
+prompt, response, credential, or export content is persisted in these tables.
