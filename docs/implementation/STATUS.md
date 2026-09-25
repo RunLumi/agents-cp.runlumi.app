@@ -7,11 +7,11 @@ Last initialized: 2026-09-24
 ## Current phase
 
 - Active execution model: **P00**
-- Current implementation phases: **P04 implemented/review; P03 complete**
-- Next implementable phase: **P05 once the P04 Integration Gate passes** (P03 IG is PASS)
-- Current Contract Gates: **P02-CG `p02-cg-v2` (v1 at `ba35fb6`; CR-001 `0290e68`; passkey-first CR-002 `1972339`); P04-CG `p04-cg-v1` (freeze `57b2df9`)**
-- Shared-file owner: **P04 coordinator for P04; P03 coordinator (merged) for P03**
-- Integration owner: **P04 coordinator for P04; P03 coordinator (merged) for P03**
+- Current implementation phases: **P05 in progress; P04 implemented/review; P03 complete**
+- Next implementable phase: **P05 packets are unlocked by the frozen P05 Contract Gate; P05 Integration Gate remains the phase exit**
+- Current Contract Gates: **P02-CG `p02-cg-v2`; P03-CG `p03-cg-v1`; P04-CG `p04-cg-v1`; P05-CG `p05-cg-v1` (freeze `b5a5ea8`)**
+- Shared-file owner: **P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
+- Integration owner: **P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
 
 ## Phase status
 
@@ -22,7 +22,7 @@ Last initialized: 2026-09-24
 | P02 | complete | frozen: `ba35fb6`; CR-001: `0290e68` | PASS: `docs/implementation/gates/P02-IG.md` | Real local identity/org/member/authz/audit slice and hostile smoke pass; browser capture follow-up documented |
 | P03 | complete | frozen: `p03-cg-v1` (PR #9; +P03-CR-001) | PASS: `docs/implementation/gates/P03-IG.md` | PR #11 (MOD/BE) + PR #14 (FE/QA) merged, hosted CI green; local smoke 17/17 |
 | P04 | review | frozen: `p04-cg-v1` (`57b2df9`) | conditional: `docs/implementation/gates/P04-IG.md` | P03 is merged and the combined P03/P04 smoke passes; P04 vertical slice, 131 Rust tests, Worker/WASM builds, hostile smoke, idempotency/health/policy extensions, authenticated desktop/narrow/editor captures, and handoffs pass; local downstream-disconnect delivery remains an explicit runtime follow-up |
-| P05 | blocked | blocked | blocked | waits for P03 + P04 |
+| P05 | in progress | frozen: `p05-cg-v1` (`b5a5ea8`) | pending | Contract Gate and 16 work packets defined; implementation and vertical control-loop smoke are next |
 | P06 | blocked | blocked | blocked | waits for P05 |
 | P07 | blocked | blocked | blocked | demand/dependency gated |
 | P08 | blocked | blocked | blocked | waits for integration foundations |
@@ -115,6 +115,29 @@ Target auth hierarchy: **passkey first, email/password second**. Existing email-
 | P04-QA-01 | review | Streaming/fallback/security smoke matrix |
 
 P04 packets remain marked `review` until the coordinator's change is committed/PR-ready; P04-owned evidence is complete, while the phase remains conditional on the named local disconnect follow-up.
+
+## P05 packet status
+
+| Packet | State | Notes |
+|---|---|---|
+| P05-MOD-01 | ready | Session/run state machine and retry semantics |
+| P05-MOD-02 | ready | Tool/capability policy evaluator |
+| P05-MOD-03 | ready | Budget reservation and rate-limit engine |
+| P05-MOD-04 | ready | Usage/cost/reconciliation model |
+| P05-BE-01 | ready | Agent/session/run persistence and APIs |
+| P05-BE-02 | ready | Tool/MCP/policy/approval APIs |
+| P05-BE-03 | ready | Usage/budget/rate APIs |
+| P05-BE-04 | ready | Audit and operational event integration |
+| P05-FE-01 | ready | Runs/session timeline UI |
+| P05-FE-02 | ready | Tool policy and approvals UI |
+| P05-FE-03 | ready | Usage/budget UI |
+| P05-INT-01 | ready | Managed run identity propagation |
+| P05-INT-02 | ready | Privileged tool decision broker |
+| P05-INT-03 | ready | MCP source/tool mapping |
+| P05-INT-04 | ready | Browser/computer policy integration |
+| P05-QA-01 | ready | Managed control-loop integration and hostile matrix |
+
+P05 Contract Gate `p05-cg-v1` is frozen at `b5a5ea8`; no dependent packet may redefine its contracts without a Change Request.
 
 ## Rule
 

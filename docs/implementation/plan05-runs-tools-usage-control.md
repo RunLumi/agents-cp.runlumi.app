@@ -1,6 +1,6 @@
 # Plan 05 — Runs, sessions, tool policy, usage, budgets
 
-Status: Planned
+Status: In progress — Contract Gate `p05-cg-v1` frozen at `b5a5ea8`; implementation packets are ready.
 Specs: F08, F12, F13, F16, F21
 Depends on: P03, P04
 

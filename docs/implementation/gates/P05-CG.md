@@ -535,7 +535,7 @@ No fixture contains a real secret, raw credential, prompt body, or external endp
 
 - Contract Gate file: `docs/implementation/gates/P05-CG.md`
 - Contract version: `p05-cg-v1`
-- Freeze commit: `PENDING`
+- Freeze commit: `b5a5ea8`
 - Unlocked packets: `P05-MOD-01..04`, `P05-BE-01..04`, `P05-FE-01..03`, `P05-INT-01..04`, `P05-QA-01`
 - Shared files: P05 coordinator owns router registration, module/permission registries, migrations, package manifests, and STATUS.
 
