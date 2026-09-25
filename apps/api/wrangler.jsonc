@@ -7,6 +7,7 @@
   "vars": {
     "ENVIRONMENT": "production",
     "OUTBOX_DLQ_NAME": "lumi-agents-outbox-dlq",
+    "JOBS_DLQ_NAME": "lumi-agents-jobs-dlq",
   },
   "d1_databases": [
     {
@@ -15,11 +16,21 @@
       "migrations_dir": "./migrations",
     },
   ],
+  "r2_buckets": [
+    {
+      "binding": "EXPORT_ARTIFACTS",
+      "bucket_name": "lumi-agents-control-plane-exports",
+    },
+  ],
   "queues": {
     "producers": [
       {
         "binding": "OUTBOX_QUEUE",
         "queue": "lumi-agents-outbox",
+      },
+      {
+        "binding": "JOBS_QUEUE",
+        "queue": "lumi-agents-jobs",
       },
     ],
     "consumers": [
@@ -33,6 +44,21 @@
       },
       {
         "queue": "lumi-agents-outbox-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 10,
+        "retry_delay": 60,
+      },
+      {
+        "queue": "lumi-agents-jobs",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 8,
+        "dead_letter_queue": "lumi-agents-jobs-dlq",
+        "retry_delay": 30,
+      },
+      {
+        "queue": "lumi-agents-jobs-dlq",
         "max_batch_size": 10,
         "max_batch_timeout": 5,
         "max_retries": 10,
@@ -59,6 +85,7 @@
       "vars": {
         "ENVIRONMENT": "development",
         "OUTBOX_DLQ_NAME": "lumi-agents-outbox-development-dlq",
+        "JOBS_DLQ_NAME": "lumi-agents-jobs-development-dlq",
       },
       "d1_databases": [
         {
@@ -67,11 +94,21 @@
           "migrations_dir": "./migrations",
         },
       ],
+      "r2_buckets": [
+        {
+          "binding": "EXPORT_ARTIFACTS",
+          "bucket_name": "lumi-agents-control-plane-exports-development",
+        },
+      ],
       "queues": {
         "producers": [
           {
             "binding": "OUTBOX_QUEUE",
             "queue": "lumi-agents-outbox-development",
+          },
+          {
+            "binding": "JOBS_QUEUE",
+            "queue": "lumi-agents-jobs-development",
           },
         ],
         "consumers": [
@@ -90,6 +127,21 @@
             "max_retries": 10,
             "retry_delay": 60,
           },
+          {
+            "queue": "lumi-agents-jobs-development",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 8,
+            "dead_letter_queue": "lumi-agents-jobs-development-dlq",
+            "retry_delay": 30,
+          },
+          {
+            "queue": "lumi-agents-jobs-development-dlq",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 10,
+            "retry_delay": 60,
+          },
         ],
       },
       "triggers": {
@@ -101,6 +153,7 @@
       "vars": {
         "ENVIRONMENT": "production",
         "OUTBOX_DLQ_NAME": "lumi-agents-outbox-dlq",
+        "JOBS_DLQ_NAME": "lumi-agents-jobs-dlq",
       },
       "d1_databases": [
         {
@@ -109,11 +162,21 @@
           "migrations_dir": "./migrations",
         },
       ],
+      "r2_buckets": [
+        {
+          "binding": "EXPORT_ARTIFACTS",
+          "bucket_name": "lumi-agents-control-plane-exports",
+        },
+      ],
       "queues": {
         "producers": [
           {
             "binding": "OUTBOX_QUEUE",
             "queue": "lumi-agents-outbox",
+          },
+          {
+            "binding": "JOBS_QUEUE",
+            "queue": "lumi-agents-jobs",
           },
         ],
         "consumers": [
@@ -127,6 +190,21 @@
           },
           {
             "queue": "lumi-agents-outbox-dlq",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 10,
+            "retry_delay": 60,
+          },
+          {
+            "queue": "lumi-agents-jobs",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 8,
+            "dead_letter_queue": "lumi-agents-jobs-dlq",
+            "retry_delay": 30,
+          },
+          {
+            "queue": "lumi-agents-jobs-dlq",
             "max_batch_size": 10,
             "max_batch_timeout": 5,
             "max_retries": 10,
