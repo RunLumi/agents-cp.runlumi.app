@@ -89,6 +89,59 @@ const SUPPORTED_EVENT_TYPES: &[&str] = &[
     "artifact.created.v1",
     "tool.policy_updated.v1",
     "rate_limit_policy.updated.v1",
+    // P06-CG (p06-cg-v1): durable operations. The event NAME registry lives
+    // here so an unknown P06 event is rejected rather than silently
+    // acknowledged. Fan-out eligibility (which of these reach a webhook) is a
+    // separate decision owned by the delivery side; this registry only proves
+    // the type is a known Lumi business event.
+    "automation.definition.created.v1",
+    "automation.definition.updated.v1",
+    "automation.definition.paused.v1",
+    "automation.definition.resumed.v1",
+    "automation.definition.deleted.v1",
+    "automation.occurrence.created.v1",
+    "automation.occurrence.dispatched.v1",
+    "automation.occurrence.started.v1",
+    "automation.occurrence.completed.v1",
+    "automation.occurrence.failed.v1",
+    "automation.occurrence.skipped.v1",
+    "automation.occurrence.missed.v1",
+    "automation.occurrence.lease_expired.v1",
+    "automation.occurrence.ambiguous.v1",
+    "webhook.endpoint_created.v1",
+    "webhook.endpoint_updated.v1",
+    "webhook.endpoint_rotated.v1",
+    "webhook.endpoint_disabled.v1",
+    "webhook.test.v1",
+    "webhook.delivery_succeeded.v1",
+    "webhook.delivery_retry_scheduled.v1",
+    "webhook.delivery_dead_lettered.v1",
+    "webhook.delivery_replayed.v1",
+    "notification.created.v1",
+    "notification.delivery_succeeded.v1",
+    "notification.delivery_retry_scheduled.v1",
+    "notification.delivery_dead_lettered.v1",
+    "billing.subscription_updated.v1",
+    "billing.grace_started.v1",
+    "billing.grace_ended.v1",
+    "entitlement.granted.v1",
+    "entitlement.revoked.v1",
+    "entitlement.override_created.v1",
+    "entitlement.override_expired.v1",
+    "license.snapshot_issued.v1",
+    "billing.downgrade_over_limit.v1",
+    "data_policy.updated.v1",
+    "export.requested.v1",
+    "export.started.v1",
+    "export.completed.v1",
+    "export.failed.v1",
+    "export.expired.v1",
+    "deletion.requested.v1",
+    "deletion.started.v1",
+    "deletion.step_completed.v1",
+    "deletion.failed.v1",
+    "deletion.resumed.v1",
+    "deletion.completed.v1",
 ];
 
 impl EventHandler for ProductEventHandler {
@@ -144,6 +197,82 @@ mod tests {
             "usage.recorded.v1",
         ] {
             assert!(SUPPORTED_EVENT_TYPES.contains(&event), "missing {event}");
+        }
+    }
+
+    /// P06-CG freezes the P06 event-name list. This test is the drift alarm: a
+    /// renamed, added, or removed P06 event must change the frozen contract
+    /// first, not the registry.
+    #[test]
+    fn p06_event_registry_matches_the_frozen_contract() {
+        for event in [
+            "automation.definition.created.v1",
+            "automation.definition.updated.v1",
+            "automation.definition.paused.v1",
+            "automation.definition.resumed.v1",
+            "automation.definition.deleted.v1",
+            "automation.occurrence.created.v1",
+            "automation.occurrence.dispatched.v1",
+            "automation.occurrence.started.v1",
+            "automation.occurrence.completed.v1",
+            "automation.occurrence.failed.v1",
+            "automation.occurrence.skipped.v1",
+            "automation.occurrence.missed.v1",
+            "automation.occurrence.lease_expired.v1",
+            "automation.occurrence.ambiguous.v1",
+            "webhook.endpoint_created.v1",
+            "webhook.endpoint_updated.v1",
+            "webhook.endpoint_rotated.v1",
+            "webhook.endpoint_disabled.v1",
+            "webhook.test.v1",
+            "webhook.delivery_succeeded.v1",
+            "webhook.delivery_retry_scheduled.v1",
+            "webhook.delivery_dead_lettered.v1",
+            "webhook.delivery_replayed.v1",
+            "notification.created.v1",
+            "notification.delivery_succeeded.v1",
+            "notification.delivery_retry_scheduled.v1",
+            "notification.delivery_dead_lettered.v1",
+            "billing.subscription_updated.v1",
+            "billing.grace_started.v1",
+            "billing.grace_ended.v1",
+            "entitlement.granted.v1",
+            "entitlement.revoked.v1",
+            "entitlement.override_created.v1",
+            "entitlement.override_expired.v1",
+            "license.snapshot_issued.v1",
+            "billing.downgrade_over_limit.v1",
+            "data_policy.updated.v1",
+            "export.requested.v1",
+            "export.started.v1",
+            "export.completed.v1",
+            "export.failed.v1",
+            "export.expired.v1",
+            "deletion.requested.v1",
+            "deletion.started.v1",
+            "deletion.step_completed.v1",
+            "deletion.failed.v1",
+            "deletion.resumed.v1",
+            "deletion.completed.v1",
+        ] {
+            assert!(SUPPORTED_EVENT_TYPES.contains(&event), "missing {event}");
+        }
+    }
+
+    /// An unknown event type must be refused rather than acknowledged, so a
+    /// typo or an undeclared future event cannot be silently dropped.
+    #[test]
+    fn an_unknown_event_type_is_not_registered() {
+        for event in [
+            "automation.occurrence.exploded.v1",
+            "webhook.endpoint_deleted.v1",
+            "entitlement.override_deleted.v1",
+            "deletion.cancelled.v1",
+        ] {
+            assert!(
+                !SUPPORTED_EVENT_TYPES.contains(&event),
+                "{event} must not be registered without a contract change"
+            );
         }
     }
 }
