@@ -241,6 +241,61 @@ fn request() -> InferenceRequest {
 }
 
 #[test]
+fn p04_permissions_extend_the_existing_matrix_without_handler_role_logic() {
+    use crate::core::{MembershipId, OrganizationId, SessionId, UserId};
+    use crate::modules::authorization::{
+        authorize, AuthorizationDecision, MembershipRole, MembershipSnapshot, MembershipStatus,
+        OrganizationContext, OrganizationState, Permission,
+    };
+    let org: OrganizationId = id("org", 1).parse().unwrap();
+    let user: UserId = id("usr", 1).parse().unwrap();
+    let membership_id: MembershipId = id("mem", 1).parse().unwrap();
+    let session: SessionId = id("ses", 1).parse().unwrap();
+    let principal = crate::core::Principal::new(
+        user.clone(),
+        session,
+        "person@example.com",
+        "Person",
+        true,
+    );
+    let organization = OrganizationContext {
+        organization_id: org.clone(),
+        state: OrganizationState::Active,
+        version: 1,
+    };
+    let membership = MembershipSnapshot {
+        membership_id,
+        organization_id: org,
+        user_id: user,
+        role: MembershipRole::Member,
+        status: MembershipStatus::Active,
+        version: 1,
+    };
+    assert_eq!(
+        authorize(
+            Some(&principal),
+            &organization,
+            Some(&membership),
+            &Permission::InferenceUse,
+            None,
+        ),
+        AuthorizationDecision::Allow
+    );
+    assert_eq!(
+        authorize(
+            Some(&principal),
+            &organization,
+            Some(&membership),
+            &Permission::CredentialsManage,
+            None,
+        ),
+        AuthorizationDecision::Deny(
+            crate::modules::authorization::DenyReason::PermissionDenied
+        )
+    );
+}
+
+#[test]
 fn native_request_keeps_alias_and_scope_separate_from_provider_credentials() {
     let request = request();
     assert_eq!(request.model, "coding-default");
