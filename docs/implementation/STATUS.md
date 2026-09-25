@@ -143,13 +143,14 @@ P05 Contract Gate `p05-cg-v1` is frozen at `b5a5ea8`; no dependent packet may re
 
 | Packet | State | Notes |
 |---|---|---|
-| P06-MOD-01 | ready | Scheduler/occurrence/lease/off-peak semantics |
-| P06-MOD-02 | ready | Entitlement evaluator and license/grace matrix |
-| P06-MOD-03 | ready | Retention/deletion planner and data-class registry |
-| P06-BE-01 | ready | Automation APIs, migration `0011_p06_automations.sql`, dispatcher |
-| P06-BE-02 | ready | Notifications/webhooks, migration `0012_p06_event_delivery.sql` |
-| P06-BE-03 | ready | Billing/entitlements/license, migration `0013_p06_billing_entitlements.sql` |
-| P06-BE-04 | ready | Export/deletion jobs, migration `0014_p06_data_governance.sql`, R2 adapter |
+| P06-MOD-01 | merged | Scheduler/occurrence/lease/off-peak semantics; 57 tests |
+| P06-MOD-02 | merged | Entitlement evaluator and license/grace matrix; 65 tests |
+| P06-MOD-03 | merged | Retention/deletion planner and 70-class data registry; 57 tests |
+| P06-SCHEMA-01 | merged | Migrations `0011`–`0014`; 8 frozen invariants proven against fresh D1 (`ce47d7a`) |
+| P06-BE-01 | ready | Automation APIs, dispatcher, device claim/start/settle/release |
+| P06-BE-02 | ready | Notifications/webhooks, signed delivery, job queue consumer |
+| P06-BE-03 | ready | Billing/entitlements/license APIs and provider adapter |
+| P06-BE-04 | ready | Export/deletion jobs and private R2 adapter (ADR 0006) |
 | P06-FE-01 | ready | Automations UI (builds from frozen fixture) |
 | P06-FE-02 | ready | Webhooks/notifications UI (builds from frozen fixture) |
 | P06-FE-03 | ready | Billing/entitlements UI (builds from frozen fixture) |

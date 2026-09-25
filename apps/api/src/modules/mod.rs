@@ -1,10 +1,13 @@
 pub mod authenticators;
 pub mod authorization;
+pub mod automations;
 pub mod budget;
 pub mod budget_p05;
 pub mod catalog;
 pub mod credentials;
+pub mod data_governance;
 pub mod devices;
+pub mod entitlements;
 pub mod identity;
 pub mod inference;
 pub mod memberships;

@@ -45,14 +45,22 @@ CREATE TABLE data_class_registry (
     version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
     created_at TEXT NOT NULL CHECK (length(created_at) = 24)
 );
--- F20 structural invariant: secrets/credentials are never exportable and are
--- crypto-erased. Provider data is never claimed to be Lumi-deletable.
+-- F20 structural invariant. A class that is NEVER exported must also be
+-- unrecoverable-or-retained: either it is secret material that is crypto-erased,
+-- or it is operational metadata that is deleted/tombstoned on its retention
+-- schedule. The frozen gate requires BOTH shapes — `webhook_secrets` is a
+-- restricted secret that is crypto-erased, while `idempotency_record` and
+-- `queue_job_envelope` are internal operational rows that are never exported and
+-- are deleted/tombstoned. Rejecting only the first shape would forbid the
+-- second, so both are accepted and a non-terminal deletion is refused.
 CREATE TRIGGER trg_data_class_registry_secret_guard
 BEFORE INSERT ON data_class_registry
-FOR EACH ROW WHEN NEW.export_behavior = 'never' AND NEW.deletion_behavior <> 'crypto_erase'
-    AND NEW.sensitivity <> 'secret'
+FOR EACH ROW WHEN NEW.export_behavior = 'never'
+    AND NEW.deletion_behavior NOT IN (
+        'crypto_erase', 'physical_delete', 'tombstone', 'revoke', 'retain_legal_only'
+    )
 BEGIN
-    SELECT RAISE(ABORT, 'non-exportable class requires crypto_erase or secret sensitivity');
+    SELECT RAISE(ABORT, 'non-exportable class requires a terminal deletion behavior');
 END;
 
 --------------------------------------------------------------------------------

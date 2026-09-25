@@ -21,14 +21,16 @@ pub use idempotency::{
     RequestFingerprint, StoredSuccess,
 };
 pub use identifiers::{
-    ActorId, AgentDefinitionId, AgentSessionId, ApprovalId, ArtifactRefId, BudgetId,
-    BudgetReservationId, CapabilityId, CorrelationId, CostRecordId, CredentialId,
-    DeviceAuthorizationId, DeviceEnrollmentId, DeviceId, EventId, IdentityId, InvitationId,
-    ManagedDeviceId, McpRegistrationId, MembershipId, ModelAliasId, ModelId, OrganizationId,
-    PolicyAckId, PolicySnapshotId, ProjectId, ProviderEndpointId, ProviderId, RateLimitPolicyId,
-    ReauthenticationGrantId, RequestId, ResourceId, RouteId, RouteVersionId, RunEventId, RunId,
-    SecurityEventId, SessionId, TeamId, TeamMemberId, ToolCallId, ToolId, ToolPolicyId,
-    UsageEventId, UsageRollupId, UserId, WorkspaceBindingId,
+    ActorId, AgentDefinitionId, AgentSessionId, ApprovalId, ArtifactRefId, AutomationId,
+    BillingAccountId, BudgetId, BudgetReservationId, CapabilityId, CorrelationId, CostRecordId,
+    CredentialId, DeviceAuthorizationId, DeviceEnrollmentId, DeviceId, EntitlementDefinitionId,
+    EntitlementGrantId, EventId, ExecutionLeaseId, IdentityId, InvitationId, LicenseSnapshotId,
+    ManagedDeviceId, McpRegistrationId, MembershipId, ModelAliasId, ModelId, OccurrenceId,
+    OrganizationId, PlanId, PolicyAckId, PolicySnapshotId, ProjectId, ProviderEndpointId,
+    ProviderEntitlementProjectionId, ProviderId, RateLimitPolicyId, ReauthenticationGrantId,
+    RequestId, ResourceId, RouteId, RouteVersionId, RunEventId, RunId, ScheduleRuleId,
+    SecurityEventId, SessionId, SubscriptionId, TeamId, TeamMemberId, ToolCallId, ToolId,
+    ToolPolicyId, UsageEventId, UsageRollupId, UserId, WorkspaceBindingId,
 };
 pub use pagination::{Cursor, Page};
 pub use principal::Principal;

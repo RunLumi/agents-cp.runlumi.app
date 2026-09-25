@@ -180,6 +180,28 @@ resource_id_type!(ToolPolicyId, InvalidResourceId, Some("tpol"));
 resource_id_type!(CostRecordId, InvalidResourceId, Some("cost"));
 resource_id_type!(RateLimitPolicyId, InvalidResourceId, Some("rlp"));
 resource_id_type!(UsageRollupId, InvalidResourceId, Some("url"));
+// P06-CG (p06-cg-v1) automation, schedule revision, occurrence, and lease
+// identifiers. `sch_` is an immutable schedule revision, not a live rule: a
+// schedule edit mints a new revision and therefore a new occurrence slot.
+resource_id_type!(AutomationId, InvalidResourceId, Some("aut"));
+resource_id_type!(ScheduleRuleId, InvalidResourceId, Some("sch"));
+resource_id_type!(OccurrenceId, InvalidResourceId, Some("occ"));
+resource_id_type!(ExecutionLeaseId, InvalidResourceId, Some("lse"));
+// P06-CG (p06-cg-v1) commercial identifiers. Provider account references stay
+// adapter-private strings; these are Lumi-owned rows only. The prefix is a wire
+// namespace, never an authorization signal, and a payment-provider product or
+// price ID can never be spelled as one of these typed rows.
+resource_id_type!(PlanId, InvalidResourceId, Some("plan"));
+resource_id_type!(BillingAccountId, InvalidResourceId, Some("bac"));
+resource_id_type!(
+    ProviderEntitlementProjectionId,
+    InvalidResourceId,
+    Some("pep")
+);
+resource_id_type!(SubscriptionId, InvalidResourceId, Some("sub"));
+resource_id_type!(EntitlementDefinitionId, InvalidResourceId, Some("ent"));
+resource_id_type!(EntitlementGrantId, InvalidResourceId, Some("egr"));
+resource_id_type!(LicenseSnapshotId, InvalidResourceId, Some("lic"));
 
 /// Opaque actor/principal identifier supplied only by trusted identity context.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
