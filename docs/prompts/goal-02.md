@@ -140,3 +140,49 @@ P02 is complete only when:
 - downstream handoff explicitly documents the stable contracts.
 
 Do not stop at "auth works". Finish the tenant security model.
+
+
+## P02-CR-002: passkey-first additive auth upgrade
+
+If `docs/implementation/STATUS.md` already shows P02 core complete, do **not** redo the completed organization/authz packets.
+
+Instead execute the accepted additive authenticator upgrade defined by P02-CR-002 and `p02-cg-v2`:
+
+- P02-MOD-05
+- P02-BE-05
+- P02-FE-04
+- P02-QA-02
+
+### Product hierarchy
+
+The resulting normal auth UI MUST be:
+
+1. passkey primary/default;
+2. email + password secondary.
+
+Email one-time-code remains verification/recovery/compatibility, not normal everyday login.
+
+### Backend safety gate
+
+Before adding a WebAuthn/password crypto dependency, prove it:
+
+- compiles for `wasm32-unknown-unknown`;
+- builds in the Cloudflare Worker;
+- verifies a real registration/assertion end-to-end;
+- can run the required password KDF within real Worker constraints.
+
+If not, stop and create an ADR rather than implementing WebAuthn crypto manually or weakening password hashing.
+
+### Upgrade integration proof
+
+Do not call this extension complete until real tests show:
+
+- passkey signup;
+- usernameless passkey login;
+- password signup/login fallback;
+- passkey browser-unavailable/cancel fallback;
+- challenge replay/expiry/origin/RP/signature/user-verification rejection;
+- passkey add/remove with last-login-method protection;
+- secure password storage and reset;
+- unchanged cookie/session/CSRF behavior;
+- unchanged desktop PKCE handoff.

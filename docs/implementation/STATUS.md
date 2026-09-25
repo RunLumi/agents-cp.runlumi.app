@@ -9,7 +9,7 @@ Last initialized: 2026-09-24
 - Active execution model: **P00**
 - Current implementation phase: **P02 complete**
 - Next implementable phase: **P03**
-- Current Contract Gate: **P02-CG `p02-cg-v1`, frozen at `ba35fb6` (P02-CR-001 at `0290e68`)**
+- Current Contract Gate: **P02-CG `p02-cg-v2` (v1 at `ba35fb6`; CR-001 `0290e68`; passkey-first CR-002 `1972339`)**
 - Shared-file owner: **P03 coordinator when assigned**
 - Integration owner: **P03 coordinator when assigned**
 
@@ -80,6 +80,19 @@ The coordinator alone:
 | P02-FE-03 | merged | Members/teams UI |
 | P02-INT-01 | merged | Desktop PKCE handoff |
 | P02-QA-01 | merged | Hostile matrix and local integration evidence |
+
+## P02 additive authentication upgrade
+
+P02 core remains complete; P03/P04 are not blocked.
+
+| Packet | State | Notes |
+|---|---|---|
+| P02-MOD-05 | ready | Passkey/password credential domain and ceremony invariants |
+| P02-BE-05 | ready | Worker/WASM verifier+KDF spike, persistence, passkey/password APIs |
+| P02-FE-04 | ready | Passkey-first signup/login; email/password secondary |
+| P02-QA-02 | ready | WebAuthn/password hostile + browser compatibility matrix |
+
+Target auth hierarchy: **passkey first, email/password second**. Existing email-code login is compatibility/recovery only after the upgrade ships.
 
 ## Rule
 
