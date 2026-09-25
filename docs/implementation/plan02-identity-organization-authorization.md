@@ -215,3 +215,68 @@ P03/P04 may begin when these are stable:
 - permission service;
 - audit actor model;
 - authenticated desktop handoff contract.
+
+
+## 10. Additive passkey-first authentication upgrade — P02-CR-002
+
+P02 core remains **Complete**. P03 and P04 remain unblocked.
+
+The product authentication hierarchy has changed after P02 completion:
+
+1. Passkey is the primary/default signup and login option.
+2. Email + password is the secondary/fallback option.
+3. The shipped email one-time-code flow remains for verification/recovery/compatibility, not the target everyday sign-in UX.
+
+This is recorded by `docs/implementation/change-requests/P02-CR-002.md` and advances the auth contract to `p02-cg-v2` without changing principal/session/org semantics.
+
+### Follow-up packets
+
+#### P02-MOD-05 — Authenticator credential domain
+
+Define passkey/password credential invariants, WebAuthn ceremony lifecycle, lockout prevention, passkey metadata, password credential semantics, and security-event names.
+
+#### P02-BE-05 — Passkey/password backend
+
+First perform a Worker/WASM compatibility spike for maintained WebAuthn verification and the required password KDF. Then implement additive migrations, passkey ceremonies, password signup/login/reset, passkey management, rate limits, sessions, and audit events.
+
+Do not manually implement WebAuthn cryptography. Do not weaken password hashing to fit Workers without an ADR.
+
+#### P02-FE-04 — Passkey-first auth UX
+
+Replace everyday email-code login UI with:
+
+- primary passkey signup/login;
+- conditional mediation/autofill where supported;
+- secondary email/password;
+- recovery/verification flows;
+- passkey account management.
+
+#### P02-QA-02 — Passkey/password hostile matrix
+
+Prove replay/origin/RP/user-verification/signature rejection, credential ownership, password storage/rate limits/recovery, browser fallback, session compatibility, and lockout prevention.
+
+### Shared-file ownership
+
+If these packets execute concurrently with P03/P04, the P02 auth-upgrade coordinator owns changes to:
+
+- auth route declarations;
+- auth migrations/manifests;
+- shared API client auth types;
+- auth-screen top-level routing.
+
+P03/P04 should consume the stable session/principal contracts and do not need to wait for the new authenticators.
+
+### Upgrade integration gate
+
+The additive auth upgrade is complete when:
+
+1. a new user registers with a passkey;
+2. signs out;
+3. signs back in usernameless with that passkey;
+4. a second user registers/signs in through email/password;
+5. unsupported/cancelled passkey UX falls back cleanly;
+6. both paths create the existing secure server session/CSRF contract;
+7. passkey challenge/replay/origin/RP/signature hostile cases pass;
+8. password KDF/storage and recovery tests pass;
+9. desktop PKCE approval still works after browser authentication with either method;
+10. no P03/P04 contract is regressed.
