@@ -57,6 +57,10 @@ const AutomationPanel = lazy(() =>
   })),
 );
 
+const BillingPanel = lazy(() =>
+  import("@/features/billing/billing-panel").then((module) => ({ default: module.BillingPanel })),
+);
+
 const WebhooksPanel = lazy(() =>
   import("@/features/webhooks/webhooks-panel").then((module) => ({
     default: module.WebhooksPanel,
@@ -452,6 +456,14 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                       canManage={canManage}
                       canRun={canRun}
                     />
+                  </Suspense>
+                ) : null}
+                {section === "billing" ? (
+                  <Suspense fallback={<LoadingPanel label="Loading plan and usage…" />}>
+                    {/* `canManage` is convenience only. The server independently
+                        enforces `billing.manage`, so this avoids rendering a
+                        control the current role cannot use. */}
+                    <BillingPanel orgId={load.organization.org_id} canManage={canManage} />
                   </Suspense>
                 ) : null}
                 {section === "webhooks" ? (
