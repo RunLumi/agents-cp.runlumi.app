@@ -1,4 +1,6 @@
+pub mod crypto;
 pub mod d1;
+pub mod providers;
 mod email;
 mod platform;
 pub mod queues;

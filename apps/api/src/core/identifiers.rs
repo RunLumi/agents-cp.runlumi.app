@@ -146,6 +146,17 @@ resource_id_type!(DeviceAuthorizationId, InvalidResourceId, Some("dev"));
 resource_id_type!(SecurityEventId, InvalidResourceId, Some("sec"));
 resource_id_type!(DeviceId, InvalidResourceId, Some("dev"));
 resource_id_type!(SessionId, InvalidResourceId, Some("ses"));
+// P04 catalog, credential, route, and usage identifiers.
+resource_id_type!(ProviderId, InvalidResourceId, Some("prv"));
+resource_id_type!(ProviderEndpointId, InvalidResourceId, Some("pe"));
+resource_id_type!(ModelId, InvalidResourceId, Some("mdl"));
+resource_id_type!(ModelAliasId, InvalidResourceId, Some("mal"));
+resource_id_type!(CredentialId, InvalidResourceId, Some("cred"));
+resource_id_type!(RouteId, InvalidResourceId, Some("rte"));
+resource_id_type!(RouteVersionId, InvalidResourceId, Some("rtv"));
+resource_id_type!(UsageEventId, InvalidResourceId, Some("use"));
+resource_id_type!(BudgetId, InvalidResourceId, Some("bud"));
+resource_id_type!(BudgetReservationId, InvalidResourceId, Some("bres"));
 
 /// Opaque actor/principal identifier supplied only by trusted identity context.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
