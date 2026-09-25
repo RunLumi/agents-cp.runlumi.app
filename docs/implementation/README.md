@@ -23,7 +23,7 @@ Every implementation agent reads, in order:
 | P03 | Device, project, policy sync | Complete (`p03-cg-v1`, P03-IG PASS) |
 | P04 | AI platform, catalog, secrets, inference | Implemented/review (`p04-cg-v1`; P04-IG conditional) |
 | P05 | Runs, tools, usage, control | Complete (`p05-cg-v1`, P05-IG conditional PASS) |
-| P06 | Automations, events, billing, data | Contract Gate in progress (`p06-cg-v1` draft) |
+| P06 | Automations, events, billing, data | Contract Gate frozen (`p06-cg-v1`); packets ready |
 | P07 | Enterprise, admin, plugins | Blocked by relevant P02/P05/P06 work |
 | P08 | LumiAgents migration and adoption | Blocked by relevant P03-P07 work |
 | P09 | Hardening and release | Blocked by MVP implementation |

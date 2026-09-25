@@ -4,7 +4,13 @@
     "automation_id": "aut_0123456789abcdef0123456789abcdef",
     "org_id": "org_0123456789abcdef0123456789abcdef",
     "project_id": "prj_0123456789abcdef0123456789abcdef",
+    "execution_principal": {
+      "kind": "user",
+      "id": "usr_0123456789abcdef0123456789abcdef"
+    },
     "name": "Weekday review",
+    "description": "Run the review agent on weekdays",
+    "agent_definition_id": "agd_0123456789abcdef0123456789abcdef",
     "target": {
       "kind": "eligible_device",
       "workspace_binding_id": "wsb_0123456789abcdef0123456789abcdef",
@@ -14,21 +20,72 @@
       "kind": "cron",
       "expression": "0 9 * * 1-5",
       "timezone": "America/Los_Angeles",
+      "dom_dow_mode": "or",
+      "dst_policy": "skip_duplicate",
       "overlap_policy": "skip",
       "missed_policy": "run_once",
       "catch_up_limit": 1
     },
+    "execution_policy": {
+      "model_alias": "coding-default",
+      "budget_id": null,
+      "tool_policy_scope": "project",
+      "required_policy_version": null
+    },
+    "schedule_cursor_at": "2026-09-25T16:00:00.000Z",
+    "execution_retry": {
+      "max_start_attempts": 2,
+      "lease_ttl_seconds": 300,
+      "heartbeat_interval_seconds": 30
+    },
     "status": "active",
     "version": 3
   },
+  "off_peak": {
+    "schema_version": 1,
+    "eligibility_source": "provider_ticket",
+    "allowed_route_aliases": [],
+    "tool_constraints": {
+      "deny_automation_mutation": true,
+      "deny_recursive_off_peak": true,
+      "allow_background_processes": false
+    }
+  },
   "occurrence": {
     "occurrence_id": "occ_0123456789abcdef0123456789abcdef",
+    "identity_key": {
+      "kind": "scheduled",
+      "automation_id": "aut_0123456789abcdef0123456789abcdef",
+      "schedule_rule_id": "sch_0123456789abcdef0123456789abcdef",
+      "scheduled_for_utc": "2026-09-25T16:00:00.000Z"
+    },
     "automation_id": "aut_0123456789abcdef0123456789abcdef",
+    "org_id": "org_0123456789abcdef0123456789abcdef",
+    "project_id": "prj_0123456789abcdef0123456789abcdef",
+    "execution_principal": {
+      "kind": "user",
+      "id": "usr_0123456789abcdef0123456789abcdef"
+    },
     "scheduled_for": "2026-09-25T16:00:00.000Z",
+    "schedule_rule_id": "sch_0123456789abcdef0123456789abcdef",
     "schedule_rule_version": 3,
     "state": "pending",
     "attempt": 0,
-    "kind": "scheduled"
+    "kind": "scheduled",
+    "off_peak_mode": "normal",
+    "policy_snapshot_id": "pol_0123456789abcdef0123456789abcdef",
+    "policy_version": 4,
+    "reason_code": null,
+    "run_id": null,
+    "created_at": "2026-09-25T15:59:59.000Z",
+    "updated_at": "2026-09-25T15:59:59.000Z"
+  },
+  "run_link": {
+    "occurrence_id": "occ_0123456789abcdef0123456789abcdef",
+    "attempt": 1,
+    "lease_id": "lse_0123456789abcdef0123456789abcdef",
+    "run_id": "run_0123456789abcdef0123456789abcdef",
+    "state": "linked"
   },
   "lease": {
     "lease_id": "lse_0123456789abcdef0123456789abcdef",
@@ -36,53 +93,94 @@
     "device_id": "dvc_0123456789abcdef0123456789abcdef",
     "state": "active",
     "attempt": 1,
+    "lease_version": 1,
+    "lease_fence": 1,
+    "started_at": null,
     "expires_at": "2026-09-25T16:05:00.000Z"
   },
   "webhook": {
     "endpoint_id": "whe_0123456789abcdef0123456789abcdef",
+    "delivery_id": "whd_0123456789abcdef0123456789abcdef",
+    "attempt_id": "wha_0123456789abcdef0123456789abcdef",
     "event_id": "evt_0123456789abcdef0123456789abcdef",
-    "event_type": "automation.completed.v1",
+    "event_type": "automation.occurrence.completed.v1",
     "signature_version": "v1",
+    "signature_key_id": "whs_fixture",
     "timestamp": 1780000000,
-    "signature": "v1=placeholder-not-a-real-signature",
+    "signature": "v1=f7473e66f227a440883404278c7759d12c8fcceb609831dc9735a7c1ecae9341",
+    "signature_test_vector": {
+      "secret_env": "P06_TEST_WEBHOOK_SECRET",
+      "fixture_key_material": "p06-fixture-key-v1",
+      "timestamp": 1780000000,
+      "body_serialization": "exact UTF-8 JSON in body below",
+      "note": "fixture key is non-production test material only"
+    },
     "body": {
       "event_id": "evt_0123456789abcdef0123456789abcdef",
-      "event_type": "automation.completed.v1",
+      "event_type": "automation.occurrence.completed.v1",
+      "occurred_at": "2026-09-25T16:00:00.000Z",
+      "request_id": "req_0123456789abcdef0123456789abcdef",
+      "correlation_id": "req_0123456789abcdef0123456789abcdef",
+      "actor": {
+        "type": "system",
+        "id": null,
+        "effective_user_id": null
+      },
       "organization_id": "org_0123456789abcdef0123456789abcdef",
-      "occurrence_id": "occ_0123456789abcdef0123456789abcdef",
-      "resource_version": 4
+      "payload": {
+        "schema_version": 1,
+        "subject_type": "automation_occurrence",
+        "subject_id": "occ_0123456789abcdef0123456789abcdef",
+        "resource_version": 4,
+        "state": "succeeded",
+        "reason_code": null
+      }
     }
   },
   "entitlements": {
     "subscription_id": "sub_0123456789abcdef0123456789abcdef",
+    "billing_account_id": "bac_0123456789abcdef0123456789abcdef",
     "org_id": "org_0123456789abcdef0123456789abcdef",
     "plan_key": "team",
     "status": "grace",
-    "grace_expires_at": "2026-10-02T12:00:00.000Z",
+    "policy_fresh_until": "2026-09-25T16:15:00.000Z",
+    "offline_valid_until": "2026-10-02T12:00:00.000Z",
     "values": {
       "automations.max_active": 100,
       "webhooks.enabled": true,
       "exports.enabled": true
     }
   },
+  "provider_entitlements": {
+    "projection_id": "pep_0123456789abcdef0123456789abcdef",
+    "org_id": "org_0123456789abcdef0123456789abcdef",
+    "provider": "upstream_ai",
+    "status": "available",
+    "observed_at": "2026-09-25T15:59:00.000Z",
+    "capability_class": "provider_managed_inference"
+  },
   "data_policy": {
     "policy_id": "dgp_0123456789abcdef0123456789abcdef",
     "org_id": "org_0123456789abcdef0123456789abcdef",
     "project_id": null,
     "logging_mode": "metadata_only",
+    "class_retention_overrides": {},
+    "legal_hold": false,
+    "backup_lifecycle": "platform_35_day_expiry",
+    "provider_retention_disclosure": "external_policy",
     "default_retention_days": 90,
     "default_export_expiry_seconds": 86400
   },
   "jobs": {
     "export": {
       "export_id": "exp_0123456789abcdef0123456789abcdef",
-      "state": "running",
+      "state": "ready",
       "attempt": 1,
       "artifact_expires_at": "2026-09-26T12:00:00.000Z"
     },
     "deletion": {
       "deletion_id": "del_0123456789abcdef0123456789abcdef",
-      "state": "failed",
+      "state": "needs_attention",
       "attempt": 1,
       "failed_step": "artifact_objects",
       "resume_allowed": true
@@ -94,15 +192,48 @@
       "expression": "not a cron",
       "timezone": "America/Los_Angeles"
     },
+    "lease_partition": {
+      "started": true,
+      "lease_expired": true,
+      "expected_state": "ambiguous",
+      "expected_redispatch": false,
+      "stale_settle": "rejected_lease_fence"
+    },
+    "concurrent_claim": {
+      "occurrence_id": "occ_0123456789abcdef0123456789abcdef",
+      "device_a": "dvc_0123456789abcdef0123456789abcdef",
+      "device_b": "dvc_1123456789abcdef0123456789abcdef",
+      "expected_winner_count": 1,
+      "loser_reason": "occurrence_already_claimed"
+    },
+    "legal_hold": {
+      "deletion_id": "del_0123456789abcdef0123456789abcdef",
+      "state": "needs_attention",
+      "reason": "deletion_legal_hold",
+      "resume_requires": "audited_support_release"
+    },
+    "personal_export": {
+      "scope_type": "user",
+      "categories": ["identity", "notifications"],
+      "requires_reauthentication": true,
+      "download_state": "ready"
+    },
     "over_limit_downgrade": {
       "plan_key": "starter",
       "automations.max_active": 3,
       "current_active_automations": 7,
       "expected": "block_new_and_expansion_without_delete"
     },
+    "license_state_matrix": {
+      "active": {"local": "allowed", "cloud": "allowed", "paid_inference": "allowed"},
+      "grace": {"local": "until_offline_valid_until", "cloud": "until_cloud_grace", "paid_inference": "provider_dependent"},
+      "past_due": {"local": "until_signed_offline_expiry", "cloud": "denied", "paid_inference": "denied"},
+      "suspended": {"local": "in_flight_only", "cloud": "denied", "paid_inference": "denied"},
+      "cancelled": {"local": "in_flight_only", "cloud": "denied", "paid_inference": "denied"}
+    },
     "transient_billing_outage": {
       "subscription_status": "grace",
-      "local_execution": "allowed_until_grace_expiry",
+      "local_execution": "allowed_until_offline_valid_until",
       "platform_paid_inference": "may_deny_with_stable_reason"
     }
   }
