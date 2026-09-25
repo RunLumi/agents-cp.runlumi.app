@@ -57,6 +57,10 @@ const AutomationPanel = lazy(() =>
   })),
 );
 
+const DataPanel = lazy(() =>
+  import("@/features/data-governance/data-panel").then((module) => ({ default: module.DataPanel })),
+);
+
 const BillingPanel = lazy(() =>
   import("@/features/billing/billing-panel").then((module) => ({ default: module.BillingPanel })),
 );
@@ -455,6 +459,19 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                       orgId={load.organization.org_id}
                       canManage={canManage}
                       canRun={canRun}
+                    />
+                  </Suspense>
+                ) : null}
+                {section === "data" ? (
+                  <Suspense fallback={<LoadingPanel label="Loading data controls…" />}>
+                    {/* F20: this surface is where the honesty requirements live —
+                        what a deletion covers, what it explicitly does not, and
+                        where a coverage gap is stated rather than implied. */}
+                    <DataPanel
+                      orgId={load.organization.org_id}
+                      canManage={canManage}
+                      canExport={canManage}
+                      canDelete={canManage}
                     />
                   </Suspense>
                 ) : null}
