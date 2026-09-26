@@ -262,12 +262,21 @@ fn documented_non_exportable_classes() {
     assert_eq!(
         never,
         vec![
+            // P07 adds three, and each answers the same question: may this leave
+            // the platform at all? `api_key` is a credential hash; `staff_principal`
+            // and `support_grant` are platform identities and the record of who
+            // asked for customer context. A customer export carrying any of them
+            // would either hand out credential material or disclose that the
+            // platform was investigating that customer.
+            "api_key",
             "idempotency_record",
             "login_session",
             "operational_log",
             "outbox_event",
             "queue_job_envelope",
             "secret",
+            "staff_principal",
+            "support_grant",
             "webhook_secret",
         ]
     );

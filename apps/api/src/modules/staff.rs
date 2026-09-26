@@ -139,12 +139,9 @@ impl StaffPermission {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        for candidate in Self::all() {
-            if candidate.as_str() == value {
-                return Some(candidate);
-            }
-        }
-        None
+        Self::all()
+            .into_iter()
+            .find(|candidate| candidate.as_str() == value)
     }
 
     pub const fn all() -> [StaffPermission; 16] {

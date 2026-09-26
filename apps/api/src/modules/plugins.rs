@@ -452,9 +452,12 @@ fn enum_diff(class: &str, before: bool, after: bool) -> ClassDiff {
 // ------------------------------------------------------------------ policy ---
 
 /// Which publishers an organization trusts (F25-004).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PublisherMode {
+    /// The default, and therefore the value an unrecognised stored string falls
+    /// back to: official publishers only.
+    #[default]
     OfficialOnly,
     ApprovedPublishers,
     Any,
@@ -480,10 +483,12 @@ impl PublisherMode {
 }
 
 /// Whether an expansion needs renewed approval (F25-003).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateMode {
-    /// An expanding update is refused and enters `pending_review`.
+    /// An expanding update is refused and enters `pending_review`. The default,
+    /// because an unrecognised stored value must narrow rather than widen.
+    #[default]
     Managed,
     /// An expanding update may install; the expansion is still audited.
     Direct,

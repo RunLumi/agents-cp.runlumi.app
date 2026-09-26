@@ -887,3 +887,400 @@ mod tests {
         }
     }
 }
+
+// ------------------------------------------------------------ service layer ---
+
+/// Refusals from the P07 service layer, each mapping to a frozen wire code.
+///
+/// These are deliberately distinct from [`MachineDenyReason`], which is what
+/// `authorize_machine` returns. One describes a REQUEST that a credential made;
+/// the other describes a CREDENTIAL an operator tried to create. Merging them
+/// would mean a bad request and a bad credential answered with the same code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MachineIdentityError {
+    /// The request named a capability that is not a real permission.
+    CapabilityUnknown,
+    /// The request named a permission that no machine may hold.
+    CapabilityHumanOnly,
+    /// A key's scope is not a subset of its service account's capabilities.
+    ScopeExceedsAccount,
+    /// The frozen per-organization or per-account bound is reached.
+    KeyLimitReached,
+    /// The key is `revoked`, `rotated` or `expired`; there is nothing to replace.
+    KeyTerminal,
+    /// A name, description, or expiry failed its bound.
+    InvalidInput,
+    /// The stored row could not be read as the contract describes it. Reported
+    /// as unavailable rather than as a caller error, because a caller did not
+    /// cause it.
+    StoreUnreadable,
+}
+
+impl MachineIdentityError {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::CapabilityUnknown => "capability_unknown",
+            Self::CapabilityHumanOnly => "capability_human_only",
+            Self::ScopeExceedsAccount => "scope_capability_unknown",
+            Self::KeyLimitReached => "key_limit_reached",
+            Self::KeyTerminal => "key_terminal",
+            Self::InvalidInput => "invalid_input",
+            Self::StoreUnreadable => "machine_identity_store_unreadable",
+        }
+    }
+}
+
+/// A validated, deduplicated, ordered capability set.
+///
+/// Ordering is part of the value: two capability sets that mean the same thing
+/// serialize to the same JSON, so an unchanged PATCH does not produce a new
+/// `version` and an audit entry for a no-op.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CapabilitySet(Vec<Permission>);
+
+impl CapabilitySet {
+    /// Parse the JSON array form stored in `capabilities_json`.
+    ///
+    /// The three refusals are ordered so the caller gets the most specific one: an
+    /// unknown name is reported as unknown even if it is also unparseable as a
+    /// permission, because "you asked for a capability that does not exist" is
+    /// the actionable message and "capability is human-only" for a name Lumi has
+    /// never heard of would send an operator looking for a control that is not
+    /// there.
+    pub fn parse(value: &str) -> Result<Self, MachineIdentityError> {
+        let parsed: serde_json::Value =
+            serde_json::from_str(value).map_err(|_| MachineIdentityError::InvalidInput)?;
+        let entries = parsed
+            .as_array()
+            .ok_or(MachineIdentityError::InvalidInput)?;
+        let mut capabilities: Vec<Permission> = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let name = entry.as_str().ok_or(MachineIdentityError::InvalidInput)?;
+            if name == "*" {
+                // A wildcard is the implicit-inheritance failure F14-001
+                // forbids, refused here as well as by the 0016 triggers so the
+                // caller gets a code rather than a constraint collision.
+                return Err(MachineIdentityError::CapabilityUnknown);
+            }
+            let permission = Permission::parse(name);
+            if matches!(permission, Permission::Unknown(_)) {
+                return Err(MachineIdentityError::CapabilityUnknown);
+            }
+            if is_human_only(&permission) {
+                return Err(MachineIdentityError::CapabilityHumanOnly);
+            }
+            if !capabilities.contains(&permission) {
+                capabilities.push(permission);
+            }
+        }
+        capabilities.sort_by_key(|permission| permission.as_str().to_owned());
+        Ok(Self(capabilities))
+    }
+
+    pub fn from_permissions(capabilities: Vec<Permission>) -> Result<Self, MachineIdentityError> {
+        Self::parse(
+            &serde_json::to_string(&capabilities.iter().map(|p| p.as_str()).collect::<Vec<_>>())
+                .map_err(|_| MachineIdentityError::InvalidInput)?,
+        )
+    }
+
+    pub fn permissions(&self) -> &[Permission] {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Is every capability here also in `account`?
+    ///
+    /// A key may hold a SUBSET of its account's capabilities and never a
+    /// superset. The gate delegates this rule to the domain layer "because it is
+    /// the only place that can read both rows cheaply and explain the difference
+    /// to the caller" — this is that place, and `scope_capability_unknown` is the
+    /// code it refuses with.
+    pub fn is_subset_of(&self, account: &CapabilitySet) -> bool {
+        self.0.iter().all(|held| account.0.contains(held))
+    }
+
+    /// The difference, for the error detail an operator reads. Names the
+    /// capabilities the key asked for that its account does not hold, so the fix
+    /// is obvious without reading the request again.
+    /// Owned strings, because `Permission::as_str` borrows from the `Unknown`
+    /// variant and this is used to build a response detail an `ApiError` has to
+    /// own.
+    pub fn excess_over(&self, account: &CapabilitySet) -> Vec<String> {
+        self.0
+            .iter()
+            .filter(|held| !account.0.contains(held))
+            .map(|held| held.as_str().to_owned())
+            .collect()
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(
+            &self
+                .0
+                .iter()
+                .map(|permission| permission.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|_| "[]".to_owned())
+    }
+}
+
+/// Read a stored `project_ids_json` back into a scope.
+///
+/// `null` is meaningful and is not the same as `[]`: `null` means every project
+/// in the organization, `[]` means no project at all. The 0016 schema has the
+/// same distinction, and conflating them would silently widen a key to the whole
+/// organization — the exact failure F14-003 and the F14 acceptance criterion
+/// exist to prevent.
+pub fn project_scope(value: Option<&str>) -> Result<Option<Vec<ProjectId>>, MachineIdentityError> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let parsed: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| MachineIdentityError::InvalidInput)?;
+    if parsed.is_null() {
+        return Ok(None);
+    }
+    let entries = parsed
+        .as_array()
+        .ok_or(MachineIdentityError::InvalidInput)?;
+    let mut projects = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let id = entry.as_str().ok_or(MachineIdentityError::InvalidInput)?;
+        projects.push(id.parse().map_err(|_| MachineIdentityError::InvalidInput)?);
+    }
+    Ok(Some(projects))
+}
+
+pub fn string_list(value: Option<&str>) -> Result<Option<Vec<String>>, MachineIdentityError> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let parsed: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| MachineIdentityError::InvalidInput)?;
+    if parsed.is_null() {
+        return Ok(None);
+    }
+    let entries = parsed
+        .as_array()
+        .ok_or(MachineIdentityError::InvalidInput)?;
+    let mut values = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let text = entry.as_str().ok_or(MachineIdentityError::InvalidInput)?;
+        if text.is_empty() || text.len() > 300 {
+            return Err(MachineIdentityError::InvalidInput);
+        }
+        values.push(text.to_owned());
+    }
+    values.sort();
+    values.dedup();
+    Ok(Some(values))
+}
+
+/// Rebuild a decision-ready scope from a stored row.
+pub fn scope_from_stored(
+    capabilities_json: &str,
+    project_ids_json: Option<&str>,
+    model_aliases_json: Option<&str>,
+    network_allowlist_json: Option<&str>,
+) -> Result<ApiKeyScope, MachineIdentityError> {
+    let capabilities = CapabilitySet::parse(capabilities_json)?;
+    Ok(ApiKeyScope {
+        capabilities: capabilities.permissions().to_vec(),
+        project_ids: project_scope(project_ids_json)?,
+        model_aliases: string_list(model_aliases_json)?,
+        network_allowlist: string_list(network_allowlist_json)?,
+    })
+}
+
+/// F14-005's bounded source hint.
+///
+/// A derived network prefix or a device slug, never a request payload, a header
+/// bag, or a URL with a query string. The truncation is a bound on STORED length,
+/// not a sanitiser: a caller that passes a long string gets it cut, and the
+/// schema's `length <= 200` CHECK is the backstop.
+pub fn last_used_source(client_ip: Option<&str>, device_slug: Option<&str>) -> Option<String> {
+    let source = match (client_ip, device_slug) {
+        (Some(ip), _) => Some(format!("ip:{ip}")),
+        (None, Some(slug)) => Some(format!("device:{slug}")),
+        (None, None) => None,
+    }?;
+    Some(source.chars().take(200).collect())
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+
+    fn capabilities(values: &[&str]) -> Result<CapabilitySet, MachineIdentityError> {
+        CapabilitySet::parse(&serde_json::to_string(values).expect("serializable"))
+    }
+
+    #[test]
+    fn a_well_formed_capability_set_parses_and_round_trips() {
+        let set = capabilities(&["runs.read", "runs.start"]).expect("valid");
+        assert_eq!(set.permissions().len(), 2);
+        assert_eq!(set.to_json(), r#"["runs.read","runs.start"]"#);
+    }
+
+    /// Ordering and duplicates are normalized, so a client that sends the same set
+    /// in a different order does not produce a new version and a new audit entry.
+    #[test]
+    fn a_capability_set_is_order_and_duplicate_insensitive() {
+        let a = capabilities(&["runs.start", "runs.read"]).expect("valid");
+        let b = capabilities(&["runs.read", "runs.start", "runs.read"]).expect("valid");
+        assert_eq!(a, b);
+        assert_eq!(a.to_json(), b.to_json());
+    }
+
+    #[test]
+    fn an_unknown_capability_is_refused_by_name() {
+        assert_eq!(
+            capabilities(&["runs.read", "made.up"]),
+            Err(MachineIdentityError::CapabilityUnknown)
+        );
+        assert_eq!(
+            capabilities(&["*"]),
+            Err(MachineIdentityError::CapabilityUnknown)
+        );
+    }
+
+    /// F14-007. A human-only capability is refused as human-only, not as
+    /// "unknown", so the operator is told the control exists and cannot be
+    /// granted to a machine.
+    #[test]
+    fn a_human_only_capability_is_refused_with_its_own_code() {
+        for name in [
+            "org.ownership_transfer",
+            "org.lifecycle",
+            "org.leave",
+            "billing.manage",
+            "data.delete",
+        ] {
+            assert_eq!(
+                capabilities(&[name]),
+                Err(MachineIdentityError::CapabilityHumanOnly),
+                "{name} must be refused as human-only"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_array_or_non_string_capability_value_is_refused() {
+        for raw in ["{}", "not json", "[42]", r#"[{"perm":"runs.read"}]"#] {
+            assert_eq!(
+                CapabilitySet::parse(raw),
+                Err(MachineIdentityError::InvalidInput),
+                "{raw} must be refused"
+            );
+        }
+    }
+
+    /// A key holds a subset of its account and never a superset. This is the rule
+    /// the 0016 triggers delegate here.
+    #[test]
+    fn a_key_scope_may_not_exceed_its_service_account() {
+        let account = capabilities(&["runs.read", "runs.start"]).expect("valid");
+        let subset = capabilities(&["runs.read"]).expect("valid");
+        assert!(subset.is_subset_of(&account));
+        assert!(account.is_subset_of(&account));
+
+        let superset = capabilities(&["runs.read", "usage.read"]).expect("valid");
+        assert!(!superset.is_subset_of(&account));
+        assert_eq!(
+            superset.excess_over(&account),
+            vec!["usage.read".to_owned()]
+        );
+    }
+
+    /// The F14 acceptance criterion's data shape: "all projects" and "no
+    /// projects" are different values, and only one of them is restrictive.
+    #[test]
+    fn an_absent_project_list_is_all_projects_and_an_empty_one_is_none() {
+        assert_eq!(project_scope(None).expect("null"), None);
+        assert_eq!(project_scope(Some("null")).expect("json null"), None);
+        assert_eq!(project_scope(Some("[]")).expect("empty"), Some(Vec::new()));
+
+        let one = project_scope(Some(r#"["prj_0123456789abcdef0123456789abcdef"]"#))
+            .expect("valid")
+            .expect("present");
+        assert_eq!(one.len(), 1);
+        assert_eq!(
+            project_scope(Some(r#"["not-a-project"]"#)),
+            Err(MachineIdentityError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn a_stored_row_rebuilds_a_scope_that_denies_what_it_should() {
+        let scope = scope_from_stored(
+            r#"["runs.start"]"#,
+            Some(r#"["prj_0123456789abcdef0123456789abcdef"]"#),
+            Some(r#"["fast"]"#),
+            Some(r#"["*.trusted.example"]"#),
+        )
+        .expect("valid row");
+        assert!(scope.allows(&Permission::RunsStart));
+        assert!(!scope.allows(&Permission::RunsRead));
+        assert!(scope.allows_model_alias("fast"));
+        assert!(!scope.allows_model_alias("slow"));
+        assert!(scope.allows_network(Some("ci.trusted.example")));
+    }
+
+    #[test]
+    fn an_unreadable_stored_row_is_not_reported_as_a_caller_error() {
+        assert_eq!(
+            scope_from_stored("{", None, None, None),
+            Err(MachineIdentityError::InvalidInput)
+        );
+    }
+
+    /// F14-005. The source hint is a derived prefix, and it is bounded.
+    #[test]
+    fn the_last_used_source_is_a_bounded_derived_hint() {
+        assert_eq!(
+            last_used_source(Some("203.0.113.10"), None),
+            Some("ip:203.0.113.10".to_owned())
+        );
+        assert_eq!(
+            last_used_source(None, Some("runner-7")),
+            Some("device:runner-7".to_owned())
+        );
+        assert_eq!(last_used_source(None, None), None);
+        let long = "9".repeat(400);
+        let source = last_used_source(Some(&long), None).expect("always present");
+        assert_eq!(source.chars().count(), 200);
+    }
+
+    #[test]
+    fn every_service_error_has_a_stable_code() {
+        for (error, code) in [
+            (
+                MachineIdentityError::CapabilityUnknown,
+                "capability_unknown",
+            ),
+            (
+                MachineIdentityError::CapabilityHumanOnly,
+                "capability_human_only",
+            ),
+            (
+                MachineIdentityError::ScopeExceedsAccount,
+                "scope_capability_unknown",
+            ),
+            (MachineIdentityError::KeyLimitReached, "key_limit_reached"),
+            (MachineIdentityError::KeyTerminal, "key_terminal"),
+        ] {
+            assert_eq!(error.code(), code);
+        }
+    }
+}

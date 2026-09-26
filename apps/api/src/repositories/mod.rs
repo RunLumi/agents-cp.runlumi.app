@@ -15,8 +15,11 @@ mod device;
 mod devices;
 mod idempotency;
 mod identity;
+mod machine_identity;
 mod organizations;
 mod outbox;
+mod platform_ops;
+mod plugins;
 mod policy;
 mod projects;
 mod runs;
@@ -46,11 +49,14 @@ pub use idempotency::{IdempotencyClaimToken, IdempotencyLookup, IdempotencyRepos
 pub use identity::{
     ChallengeRecord, IdentityRecord, IdentityRepository, SessionRecord, SessionSummary, UserRecord,
 };
+pub use machine_identity::*;
 pub use organizations::{
     InvitationRecord, MembershipRecord, OrganizationRecord, OrganizationRepository,
     OrganizationSummary, TeamRecord,
 };
 pub use outbox::OutboxRepository;
+pub use platform_ops::*;
+pub use plugins::*;
 pub use policy::{PolicyAckRecord, PolicyRepository, PolicySnapshotRecord};
 pub use projects::{
     NewProjectInput, ProjectGrantRecord, ProjectRecord, ProjectRepository, ProjectUpdateInput,

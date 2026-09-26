@@ -812,6 +812,195 @@ const DEFINITIONS: &[Definition] = &[
         logging: LoggingRule::MetadataOnly,
         description: "The governance declaration table itself, versioned with only changed keys logged.",
     },
+    // ---------------------------------------------------------------- P07 --
+    //
+    // F20-001 requires every persistent table to be declared here, and the
+    // P07 tables are no exception. Three of these rows are load-bearing rather
+    // than bookkeeping, and the registry's own `validate` is what enforces them:
+    //
+    //   * `api_key` is `secret`, which `validate` requires to be
+    //     `export_behavior = never` AND `deletion_behavior = crypto_erase`.
+    //     Declaring it `confidential` with an `included` export would have been
+    //     the easy mistake, and it would have put credential hashes in customer
+    //     exports.
+    //   * `staff_principal` and `support_grant` are `never` exported, so a
+    //     customer export cannot carry platform staff identities. The P06
+    //     `trg_data_class_registry_secret_guard` accepts `retain_legal_only`
+    //     for a non-exportable class, which is exactly what these need: the audit
+    //     trail must survive a staff departure, and the identity must not travel
+    //     outward while it does.
+    //   * `plugin_quarantine` and `kill_switch` are `retain_legal_only` for the
+    //     same reason. Deleting the record of a security action would destroy the
+    //     evidence that it happened, which is the "hard to audit" failure F24 is
+    //     written against.
+    Definition {
+        class: "service_account",
+        sensitivity: Sensitivity::Confidential,
+        owner_scope: OwnerScope::Organization,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        export: ExportBehavior::MetadataOnly,
+        // `revoke`, not `physical_delete`: the account and its credential
+        // relationship is audit evidence after a rotation, and revocation is
+        // what actually stops it.
+        deletion: DeletionBehavior::Revoke,
+        logging: LoggingRule::IdsStatus,
+        description: "Org-owned non-human account and its declared capability set. Never a membership role.",
+    },
+    Definition {
+        class: "api_key",
+        sensitivity: Sensitivity::Secret,
+        owner_scope: OwnerScope::Organization,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        // `never` is enforced by `validate` for any secret class, and the P06
+        // trigger accepts crypto_erase as a terminal deletion shape. A
+        // compromise of the table alone yields no usable credential because the
+        // raw key was never written; this row records that promise.
+        export: ExportBehavior::Never,
+        deletion: DeletionBehavior::CryptoErase,
+        logging: LoggingRule::IdsStatus,
+        description: "Scoped machine credential: hashed secret, non-secret prefix, fingerprint, scope, and lifecycle. Raw key shown once.",
+    },
+    Definition {
+        class: "api_key_fingerprint",
+        sensitivity: Sensitivity::Internal,
+        owner_scope: OwnerScope::Organization,
+        retention: baseline(BaselineRetention::AccessGrant),
+        legal_maximum: bounded(ACCESS_GRANT_CEILING),
+        // `physical_delete`, unlike the key itself: a fingerprint is a truncated
+        // hash with no recovery value, so there is nothing to retain once the key
+        // it identified is gone.
+        export: ExportBehavior::MetadataOnly,
+        deletion: DeletionBehavior::PhysicalDelete,
+        logging: LoggingRule::IdsStatus,
+        description: "Truncated hash identifying a key in UI and audit. A projection on api_keys, not a separate table.",
+    },
+    Definition {
+        class: "plugin_package",
+        sensitivity: Sensitivity::Public,
+        owner_scope: OwnerScope::Platform,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        export: ExportBehavior::Included,
+        deletion: DeletionBehavior::Tombstone,
+        logging: LoggingRule::MetadataOnly,
+        description: "Platform catalog identity. Stable across renames so installs and policy never orphan.",
+    },
+    Definition {
+        class: "plugin_version",
+        sensitivity: Sensitivity::Internal,
+        owner_scope: OwnerScope::Platform,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        // `included`, because an org's export should be able to show the exact
+        // capability set it approved. The manifest declares capabilities, not
+        // customer data.
+        export: ExportBehavior::Included,
+        deletion: DeletionBehavior::Tombstone,
+        logging: LoggingRule::MetadataOnly,
+        description: "Immutable published version: compatibility range, digest, signature, and declared permission manifest.",
+    },
+    Definition {
+        class: "plugin_install",
+        sensitivity: Sensitivity::Internal,
+        owner_scope: OwnerScope::Organization,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        export: ExportBehavior::Included,
+        deletion: DeletionBehavior::Tombstone,
+        logging: LoggingRule::IdsStatus,
+        description: "One org's installation of one package: installed version, review state, and any refused candidate.",
+    },
+    Definition {
+        class: "plugin_policy",
+        sensitivity: Sensitivity::Internal,
+        owner_scope: OwnerScope::Organization,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        export: ExportBehavior::Included,
+        deletion: DeletionBehavior::Tombstone,
+        logging: LoggingRule::MetadataOnly,
+        description: "Org allow/block/pin/auto-update rules. An allow/block conflict is reported, not silently resolved.",
+    },
+    Definition {
+        class: "plugin_tool_registration",
+        sensitivity: Sensitivity::Internal,
+        owner_scope: OwnerScope::Organization,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        export: ExportBehavior::Included,
+        deletion: DeletionBehavior::Tombstone,
+        logging: LoggingRule::IdsStatus,
+        description: "Approved (org, package, version, tool) binding. Its absence is F13 default-deny for that tool.",
+    },
+    Definition {
+        class: "plugin_quarantine",
+        sensitivity: Sensitivity::Internal,
+        owner_scope: OwnerScope::Platform,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        // `metadata_only` rather than `included`: this is a platform security
+        // action, and a customer's export does not need the internal reason text.
+        export: ExportBehavior::MetadataOnly,
+        // `retain_legal_only`, and the trigger in 0017 refuses DELETE as well.
+        // Erasing this row would erase the evidence that a security action
+        // happened, which is the failure F24's objective names.
+        deletion: DeletionBehavior::RetainLegalOnly,
+        logging: LoggingRule::IdsStatus,
+        description: "Platform decision disabling one package@version. Lifted, never deleted.",
+    },
+    Definition {
+        class: "staff_principal",
+        sensitivity: Sensitivity::Restricted,
+        owner_scope: OwnerScope::Platform,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        // `never`. A customer export must not carry platform staff identities,
+        // and the credential is already `never`/crypto-erase-shaped by the P06
+        // secret guard, so this row is accepted without weakening that guard.
+        export: ExportBehavior::Never,
+        deletion: DeletionBehavior::Tombstone,
+        logging: LoggingRule::IdsStatus,
+        description: "Named internal identity and staff role. Not a users row, so no code path can treat it as a customer.",
+    },
+    Definition {
+        class: "support_grant",
+        sensitivity: Sensitivity::Restricted,
+        owner_scope: OwnerScope::Platform,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        // `never`, and `retain_legal_only` on deletion. The audit trail of who
+        // asked for customer context must outlive the staff member and must not
+        // travel outward while it does.
+        export: ExportBehavior::Never,
+        deletion: DeletionBehavior::RetainLegalOnly,
+        logging: LoggingRule::IdsStatus,
+        description: "Time-bounded, reasoned, ticketed access to one customer organization. Expiry is mandatory.",
+    },
+    Definition {
+        class: "feature_flag",
+        sensitivity: Sensitivity::Internal,
+        owner_scope: OwnerScope::Platform,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        export: ExportBehavior::MetadataOnly,
+        deletion: DeletionBehavior::Tombstone,
+        logging: LoggingRule::MetadataOnly,
+        description: "Rollout lever: enabled, percentage, org allowlist, cohort, mandatory expiry, and owning staff principal.",
+    },
+    Definition {
+        class: "kill_switch",
+        sensitivity: Sensitivity::Internal,
+        owner_scope: OwnerScope::Platform,
+        retention: RetentionWindow::Lifecycle,
+        legal_maximum: RetentionWindow::Lifecycle,
+        export: ExportBehavior::MetadataOnly,
+        // `retain_legal_only`: the record of a safety action is evidence.
+        deletion: DeletionBehavior::RetainLegalOnly,
+        logging: LoggingRule::IdsStatus,
+        description: "Narrow reversible off-switch for one target class and one reference, at global or one-organization scope.",
+    },
     Definition {
         class: "export_job",
         sensitivity: Sensitivity::Confidential,

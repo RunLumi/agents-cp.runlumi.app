@@ -12,6 +12,7 @@ mod identifiers;
 mod machine;
 mod pagination;
 mod principal;
+mod staff;
 mod timestamp;
 
 pub use context::{ActorContext, ActorType, RequestContext};
@@ -27,17 +28,19 @@ pub use identifiers::{
     CredentialId, DeviceAuthorizationId, DeviceEnrollmentId, DeviceId, EntitlementDefinitionId,
     EntitlementGrantId, EventId, ExecutionLeaseId, IdentityId, InvitationId, KillSwitchId,
     LicenseSnapshotId, ManagedDeviceId, McpRegistrationId, MembershipId, ModelAliasId, ModelId,
-    OccurrenceId, OrganizationId, PlanId, PluginInstallId, PluginPackageId, PluginQuarantineId,
-    PluginVersionId, PolicyAckId, PolicySnapshotId, ProjectId, ProviderEndpointId,
-    ProviderEntitlementProjectionId, ProviderId, RateLimitPolicyId, ReauthenticationGrantId,
-    RequestId, ResourceId, RouteId, RouteVersionId, RunEventId, RunId, ScheduleRuleId,
-    SecurityEventId, ServiceAccountId, SessionId, StaffPrincipalId, SubscriptionId, SupportGrantId,
-    TeamId, TeamMemberId, ToolCallId, ToolId, ToolPolicyId, UsageEventId, UsageRollupId, UserId,
-    WorkspaceBindingId,
+    OccurrenceId, OrganizationId, PlanId, PluginInstallId, PluginPackageId, PluginPublisherId,
+    PluginQuarantineId, PluginToolRegistrationId, PluginVersionId, PolicyAckId, PolicySnapshotId,
+    ProjectId, ProviderEndpointId, ProviderEntitlementProjectionId, ProviderId, RateLimitPolicyId,
+    ReauthenticationGrantId, RequestId, ResourceId, RouteId, RouteVersionId, RunEventId, RunId,
+    ScheduleRuleId, SecurityEventId, ServiceAccountId, SessionId, StaffPrincipalId, SubscriptionId,
+    SupportGrantId, TeamId, TeamMemberId, ToolCallId, ToolId, ToolPolicyId, UsageEventId,
+    UsageRollupId, UserId, WorkspaceBindingId,
 };
 pub use machine::{
-    MACHINE_KEY_SCHEME, MachineActor, MachineKey, MachineKeyError, constant_time_eq,
+    MACHINE_KEY_SCHEME, MachineActor, MachineKey, MachineKeyError, MachineKeyMaterial,
+    constant_time_eq,
 };
 pub use pagination::{Cursor, Page};
 pub use principal::Principal;
+pub use staff::{STAFF_KEY_SCHEME, StaffKey, StaffKeyError, StaffPrincipal};
 pub use timestamp::Timestamp;
