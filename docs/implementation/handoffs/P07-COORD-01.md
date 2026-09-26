@@ -1,5 +1,14 @@
 # P07 — Coordinator status: foundation merged, phase not complete
 
+> **SUPERSEDED.** This handoff described the P07 *foundation* only. The phase is
+> now implementation-complete and its Integration Gate is
+> `docs/implementation/gates/P07-IG.md` (PASS WITH FOLLOW-UP). Read that first.
+> Every "not started" and "no routes exist yet" below has been overtaken; it is
+> kept because the reasoning behind the scope cut is still the load-bearing part.
+>
+> Replacements: `P07-MOD-02.md`, `P07-BE-02-03-04.md`, `P07-FE-01-02-03.md`,
+> `P07-INT-01-02.md`, `P07-QA-01.md`.
+
 - Phase: P07 — Enterprise identity, machine identity, internal admin, plugins
 - Contract version: `p07-cg-v1` (frozen in `docs/implementation/gates/P07-CG.md`)
 - Normative architecture: ADR 0007 — three actor kinds, three authorization boundaries

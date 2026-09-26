@@ -15,8 +15,8 @@ use crate::{
     routes::{
         account, agents, ai_catalog, approvals, audit, auth, authenticators, automations, billing,
         budgets, data_governance, device_auth, device_runs, devices, foundation_checks,
-        health::health, inference, meta::meta, organizations, projects, runs, tools, usage,
-        webhooks,
+        health::health, inference, internal, machine_identity, meta::meta, organizations, plugins,
+        projects, runs, tools, usage, webhooks,
     },
 };
 
@@ -727,6 +727,124 @@ pub fn router(env: Env) -> Router {
         .route(
             data_governance::ME_DELETION_CANCEL_PATH,
             post(data_governance::cancel_personal_deletion),
+        )
+        // ------------------------------------------------------------------
+        // P07 enterprise identity, machine identity, and plugin governance.
+        // The mount is part of the contract for the same reason the P06 block is:
+        // these are the only paths on which the second and third actor kinds can
+        // act, and a route that is written but not mounted is a route that does
+        // not exist.
+        // ------------------------------------------------------------------
+        // Human-managed machine identity (P07-BE-02).
+        .route(
+            "/api/v1/orgs/{org_id}/service-accounts",
+            get(machine_identity::list_service_accounts)
+                .post(machine_identity::create_service_account),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/service-accounts/{service_account_id}",
+            get(machine_identity::get_service_account)
+                .patch(machine_identity::patch_service_account),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/service-accounts/{service_account_id}/suspend",
+            post(machine_identity::suspend_service_account),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/service-accounts/{service_account_id}/resume",
+            post(machine_identity::resume_service_account),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/api-keys",
+            get(machine_identity::list_api_keys).post(machine_identity::create_api_key),
+        )
+        // Organization comes from the KEY ROW on these three, so there is no
+        // `{org_id}` segment a client could point somewhere else.
+        .route(
+            "/api/v1/api-keys/{api_key_id}",
+            get(machine_identity::get_api_key),
+        )
+        .route(
+            "/api/v1/api-keys/{api_key_id}/rotate",
+            post(machine_identity::rotate_api_key),
+        )
+        .route(
+            "/api/v1/api-keys/{api_key_id}/revoke",
+            post(machine_identity::revoke_api_key),
+        )
+        // P07-INT-02: the only route a machine credential can reach. It is mounted
+        // under `/machine`, not under `/orgs`, because a key's organization is
+        // derived from the key and a path segment would imply the client chose it.
+        .route(
+            "/api/v1/machine/whoami",
+            get(machine_identity::machine_whoami),
+        )
+        // Plugin governance (P07-BE-04).
+        .route("/api/v1/orgs/{org_id}/plugins", get(plugins::list_plugins))
+        .route(
+            "/api/v1/orgs/{org_id}/plugins/policy",
+            get(plugins::get_policy).patch(plugins::patch_policy),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/plugins/{package_id}",
+            get(plugins::get_plugin),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/plugins/{package_id}/install",
+            post(plugins::install_plugin),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/plugins/{package_id}/approve",
+            post(plugins::approve_plugin),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/plugins/{package_id}/block",
+            post(plugins::block_plugin),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/plugins/{package_id}/unblock",
+            post(plugins::unblock_plugin),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/plugins/{package_id}/pin",
+            post(plugins::pin_plugin),
+        )
+        .route(
+            "/api/v1/orgs/{org_id}/plugins/{package_id}/versions/{version}/permission-diff",
+            get(plugins::permission_diff),
+        )
+        // P07-INT-01: what the host agent actually has installed.
+        .route(
+            "/api/v1/orgs/{org_id}/plugin-reports",
+            post(plugins::submit_plugin_report),
+        )
+        // Platform operations (P07-BE-03). A separate prefix, a separate
+        // credential scheme, a separate role and permission set. No handler in
+        // this module takes a `Principal`, so none of it is reachable with an
+        // organization session or an API key.
+        .route(
+            "/api/v1/internal/feature-flags",
+            get(internal::list_flags).post(internal::create_flag),
+        )
+        .route(
+            "/api/v1/internal/feature-flags/{flag_key}",
+            patch(internal::patch_flag),
+        )
+        .route(
+            "/api/v1/internal/kill-switches",
+            get(internal::list_kill_switches).post(internal::create_kill_switch),
+        )
+        .route(
+            "/api/v1/internal/kill-switches/{kill_switch_id}/lift",
+            post(internal::lift_kill_switch),
+        )
+        .route(
+            "/api/v1/internal/support-grants",
+            get(internal::list_grants).post(internal::create_grant),
+        )
+        .route(
+            "/api/v1/internal/support-grants/{grant_id}/revoke",
+            post(internal::revoke_grant),
         );
 
     if is_development {

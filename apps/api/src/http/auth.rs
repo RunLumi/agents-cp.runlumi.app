@@ -9,9 +9,12 @@ use serde_json::json;
 use crate::{
     adapters::sha256_hex,
     app::AppState,
-    core::{ApiError, ApiErrorCode, Principal, RequestContext, SessionId, UserId},
+    core::{
+        ApiError, ApiErrorCode, MachineActor, MachineKey, Principal, RequestContext, SessionId,
+        StaffPrincipalId, UserId, constant_time_eq as core_constant_time_eq,
+    },
     modules::identity::is_active_session,
-    repositories::{IdentityRepository, SessionRecord},
+    repositories::{IdentityRepository, MachineIdentityRepository, SessionRecord},
     routes::errors,
 };
 
@@ -225,6 +228,266 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         .zip(right)
         .fold(0, |difference, (left, right)| difference | (left ^ right))
         == 0
+}
+// ------------------------------------------------------------ P07 machine ---
+
+/// A machine caller resolved from a `lumik_` credential.
+///
+/// The shape is deliberately different from [`Authenticated`]: there is no
+/// session, no user, and no cookie to set. A machine must not be able to acquire
+/// anything a human session has, and the type has no field that could hold one.
+pub(crate) struct MachineAuthenticated {
+    pub actor: MachineActor,
+    /// The resolved scope, ready for `authorize_machine`. Read in the same query
+    /// as the credential so the scope cannot change between authentication and
+    /// authorization.
+    pub scope: crate::modules::machine_identity::ApiKeyScope,
+    pub state: crate::modules::machine_identity::CredentialState,
+}
+
+/// Resolve a presented `lumik_` credential into a [`MachineActor`] (P07-INT-02).
+///
+/// # Why this is a separate function and not a branch inside `require_session`
+///
+/// ADR 0007 is explicit that `authorize` must stay frozen and that a machine
+/// cannot reach a route which only calls it. A "smarter auth middleware" that
+/// returned a session-shaped value for a machine would undo that, because the
+/// route could not tell which kind of caller it had. Here the return type says so.
+///
+/// # Every refusal is the same error
+///
+/// A missing key, a wrong secret, a revoked key and a suspended account all
+/// produce `machine_key_invalid` at this layer. A caller must not be able to
+/// learn which keys exist by timing or by status code. The *specific* reasons
+/// live in `authorize_machine` and are what an operator sees in a log, not what a
+/// caller sees in a response.
+pub(crate) async fn require_machine(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    context: &RequestContext,
+) -> Result<MachineAuthenticated, ApiError> {
+    let database = state.database.as_ref().ok_or_else(|| {
+        errors::api_error(
+            context,
+            ApiErrorCode::ServiceUnavailable,
+            "The identity store is unavailable.",
+        )
+    })?;
+    let presented = read_bearer(headers).ok_or_else(|| machine_key_invalid(context))?;
+    let key = MachineKey::parse(&presented).map_err(|_| machine_key_invalid(context))?;
+
+    let resolved = MachineIdentityRepository::new(database)
+        .resolve_credential(key.prefix())
+        .await
+        .map_err(|_| {
+            errors::api_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "The identity store is unavailable.",
+            )
+        })?
+        .ok_or_else(|| machine_key_invalid(context))?;
+
+    // Constant-time on the stored hash. The prefix lookup has already told us
+    // WHICH row this is, so the comparison is only the second factor; running it
+    // in constant time keeps the habit in the same place as the session path,
+    // where a shortcut is easiest to introduce by accident.
+    let presented_hash = machine_secret_hash(key.secret());
+    if !core_constant_time_eq(
+        presented_hash.as_bytes(),
+        resolved.key.secret_hash.as_bytes(),
+    ) {
+        return Err(machine_key_invalid(context));
+    }
+    if !resolved.key.is_active() || !resolved.account_is_active() {
+        return Err(machine_key_invalid(context));
+    }
+    if is_expired(
+        resolved.key.expires_at.as_deref(),
+        context.received_at.as_str(),
+    ) || is_expired(
+        resolved.account_expires_at.as_deref(),
+        context.received_at.as_str(),
+    ) {
+        return Err(machine_key_invalid(context));
+    }
+
+    let scope = crate::modules::machine_identity::scope_from_stored(
+        &resolved.key.capabilities_json,
+        resolved.key.project_ids_json.as_deref(),
+        resolved.key.model_aliases_json.as_deref(),
+        resolved.key.network_allowlist_json.as_deref(),
+    )
+    .map_err(|_| {
+        errors::api_error(
+            context,
+            ApiErrorCode::ServiceUnavailable,
+            "The identity store is unavailable.",
+        )
+    })?;
+
+    let actor = MachineActor::new(
+        crate::core::ApiKeyId::new(resolved.key.api_key_id.clone())
+            .map_err(|_| machine_key_invalid(context))?,
+        crate::core::ServiceAccountId::new(resolved.key.service_account_id.clone())
+            .map_err(|_| machine_key_invalid(context))?,
+        crate::core::OrganizationId::new(resolved.key.org_id.clone())
+            .map_err(|_| machine_key_invalid(context))?,
+        resolved.key.key_prefix.clone(),
+    );
+
+    // F14-005, best effort. A failure to record last-used must not fail the
+    // request the credential was making.
+    let _ = MachineIdentityRepository::new(database)
+        .touch_key_use(
+            &resolved.key.api_key_id,
+            context.received_at.as_str(),
+            crate::modules::machine_identity::last_used_source(
+                read_header(headers, "cf-connecting-ip").as_deref(),
+                None,
+            )
+            .as_deref()
+            .unwrap_or("unknown"),
+        )
+        .await;
+
+    Ok(MachineAuthenticated {
+        actor,
+        scope,
+        state: crate::modules::machine_identity::CredentialState {
+            key_active: true,
+            account_active: true,
+            key_expired: false,
+        },
+    })
+}
+
+/// The stored hash is SHA-256 of the SECRET half. `core::machine` owns that
+/// derivation; this wrapper exists so the auth path never looks like it is
+/// hashing something else.
+fn machine_secret_hash(secret: &str) -> String {
+    crate::core::MachineKeyMaterial::hash_secret(secret)
+}
+
+// -------------------------------------------------------------- P07 staff ---
+
+/// A resolved internal staff caller.
+pub(crate) struct StaffAuthenticated {
+    pub actor: crate::modules::staff::StaffActor,
+    /// Not used by any P07 route: `/internal` reads no customer data, so there
+    /// is no response that needs the display name yet. It is resolved here
+    /// rather than at the call site so a future console that DOES need it does
+    /// not re-read the principal.
+    #[allow(dead_code)]
+    pub display_name: String,
+    pub staff_role: crate::modules::staff::StaffRole,
+}
+
+/// Resolve a presented `lumi_staff_` credential into a [`StaffActor`].
+///
+/// The scheme is disjoint from both the human session bearer and `lumik_`, so
+/// the three actor kinds cannot be confused for one another at a route boundary.
+/// A `lumi_staff_` token presented on an organization route therefore fails at
+/// `require_session` as an ordinary authentication failure, and a `lumik_` token
+/// presented here fails as a staff authentication failure — neither is silently
+/// reinterpreted.
+pub(crate) async fn require_staff(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    context: &RequestContext,
+) -> Result<StaffAuthenticated, ApiError> {
+    let database = state.database.as_ref().ok_or_else(|| {
+        errors::api_error(
+            context,
+            ApiErrorCode::ServiceUnavailable,
+            "The identity store is unavailable.",
+        )
+    })?;
+    let presented = read_bearer(headers).ok_or_else(|| staff_authentication_required(context))?;
+    if !presented.starts_with(crate::core::STAFF_KEY_SCHEME) {
+        return Err(staff_authentication_required(context));
+    }
+    let resolved = crate::repositories::PlatformOperationsRepository::new(database)
+        .resolve_staff_credential(&presented)
+        .await
+        .map_err(|_| {
+            errors::api_error(
+                context,
+                ApiErrorCode::ServiceUnavailable,
+                "The identity store is unavailable.",
+            )
+        })?
+        .ok_or_else(|| staff_authentication_required(context))?;
+
+    // A stored role that no longer parses is reported as an authentication
+    // failure rather than defaulted. Defaulting would mean a renamed or corrupted
+    // role silently resolved to some other role's permissions, and the only safe
+    // reading of "I do not know what this person is" is "I do not know who this
+    // person is".
+    let role = resolved
+        .role()
+        .ok_or_else(|| staff_authentication_required(context))?;
+    if !resolved.is_active() {
+        return Err(errors::api_error(
+            context,
+            ApiErrorCode::PermissionDenied,
+            "This staff principal is suspended.",
+        )
+        .with_detail("reason", json!("staff_principal_suspended")));
+    }
+    Ok(StaffAuthenticated {
+        actor: crate::modules::staff::StaffActor::new(
+            StaffPrincipalId::new(resolved.staff_principal_id)
+                .map_err(|_| staff_authentication_required(context))?,
+            role,
+            resolved.credential_prefix,
+        ),
+        display_name: resolved.display_name,
+        staff_role: role,
+    })
+}
+
+fn read_bearer(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?.trim();
+    if token.is_empty() || token.len() > 512 || token.chars().any(char::is_control) {
+        return None;
+    }
+    Some(token.to_owned())
+}
+
+fn read_header(headers: &HeaderMap, name: &str) -> Option<String> {
+    let value = headers.get(name)?.to_str().ok()?;
+    let value = value.trim();
+    if value.is_empty() || value.len() > 64 || value.chars().any(char::is_whitespace) {
+        return None;
+    }
+    Some(value.to_owned())
+}
+
+/// The stored timestamps are the fixed 24-character UTC form, so a lexicographic
+/// comparison is equivalent to a chronological one. `None` means "no expiry",
+/// which is not the same as "expired".
+fn is_expired(expires_at: Option<&str>, now: &str) -> bool {
+    expires_at.is_some_and(|expiry| now >= expiry)
+}
+
+fn machine_key_invalid(context: &RequestContext) -> ApiError {
+    errors::api_error(
+        context,
+        ApiErrorCode::AuthenticationRequired,
+        "Authentication is required.",
+    )
+    .with_detail("reason", json!("machine_key_invalid"))
+}
+
+fn staff_authentication_required(context: &RequestContext) -> ApiError {
+    errors::api_error(
+        context,
+        ApiErrorCode::AuthenticationRequired,
+        "Authentication is required.",
+    )
+    .with_detail("reason", json!("staff_authentication_required"))
 }
 
 #[cfg(test)]

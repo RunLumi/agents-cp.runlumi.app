@@ -14,16 +14,21 @@ pub mod machine_identity;
 pub mod memberships;
 pub mod organizations;
 pub mod outbox;
+pub mod plugins;
 pub mod policy;
 pub mod policy_p04;
 pub mod policy_p05;
 pub mod projects;
 pub mod rate_limits;
+pub mod rollouts;
 pub mod routing;
 pub mod runs;
+pub mod staff;
 pub mod teams;
 pub mod tool_policy;
 pub mod usage;
 
 #[cfg(test)]
 mod p04_domain_tests;
+#[cfg(test)]
+mod p07_fixture_tests;

@@ -553,6 +553,36 @@ pub const DATABASE_ROW_EXECUTORS: &[DatabaseRowExecutor] = &[
         statement: "UPDATE device_enrollments SET status = 'revoked', revoked_at = ?2 WHERE enrollment_id = ?1",
         outcome: RowOutcome::Revoke,
     },
+    // P07 machine identity. Both are `Revoke` rather than `Delete` on purpose: a
+    // deletion certificate has to be able to say "this organization's credential
+    // no longer authenticates", and it has to be able to say which one it was.
+    // Deleting the row would satisfy the first and destroy the second, and the
+    // second is what an incident review reads first.
+    DatabaseRowExecutor {
+        data_class: "service_account",
+        reference_kind: ReferenceKind::DatabaseRow,
+        // Suspending the account denies every key under it, including keys that
+        // have not expired, so one step covers the account and its credentials.
+        statement: "UPDATE service_accounts SET status = 'suspended', suspended_at = ?2, suspend_reason = ?3 WHERE service_account_id = ?1",
+        outcome: RowOutcome::Revoke,
+    },
+    DatabaseRowExecutor {
+        data_class: "api_key",
+        reference_kind: ReferenceKind::DatabaseRow,
+        // `crypto_erase` and `revoke` in one statement. The class is declared
+        // `secret` + `crypto_erase`, and the registry's own `validate` requires a
+        // secret class to be crypto-erased rather than tombstoned, so the raw
+        // secret must become unrecoverable. Overwriting the hash with a fixed
+        // zero digest is the erase: no input maps to that value, so no presented
+        // key can ever match it again. The row survives as a tombstone carrying
+        // the prefix and fingerprint, which is what the certificate cites.
+        //
+        // `revoke_reason` is bound because `trg_api_keys_revoked_requires_reason`
+        // refuses a revocation without one. An unaudited revocation is exactly
+        // what that trigger exists to prevent, and a deletion job is not exempt.
+        statement: "UPDATE api_keys SET status = 'revoked', revoked_at = ?2, revoke_reason = ?3, secret_hash = '0000000000000000000000000000000000000000000000000000000000000000' WHERE api_key_id = ?1",
+        outcome: RowOutcome::Revoke,
+    },
 ];
 
 /// Find the executor for one planned step, or `None` when the class has no
@@ -2437,6 +2467,26 @@ mod tests {
             // deletion would not be.
             "project_access_grant",
             "team_member",
+            // P07 gaps, each with its own reason rather than a blanket note:
+            //
+            //   `api_key_fingerprint` is declared `physical_delete`, but it is a
+            //   COLUMN on `api_keys`, not a table. Physically removing it means
+            //   deleting the parent row, and the parent row is the audit record
+            //   of which key existed and was revoked. A step that deleted it
+            //   would satisfy the letter of the declaration and destroy the
+            //   evidence, so the step parks instead.
+            //
+            //   The three plugin rows are organization-scoped and cascade from
+            //   `organizations`, so they DO disappear with the organization. They
+            //   are declared `tombstone` because the plugin catalog and the
+            //   published version are PLATFORM rows that outlive the tenant, and a
+            //   per-class tombstone column does not exist on any of the three.
+            //   Claiming a tombstone that is not written would be a false report
+            //   in a customer-facing certificate.
+            "api_key_fingerprint",
+            "plugin_install",
+            "plugin_policy",
+            "plugin_tool_registration",
         ];
         for class in crate::modules::data_governance::deletion_reachable_classes() {
             let executable = database_row_executor(&class, ReferenceKind::DatabaseRow).is_some();

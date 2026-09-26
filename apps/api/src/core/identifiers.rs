@@ -212,9 +212,14 @@ resource_id_type!(LicenseSnapshotId, InvalidResourceId, Some("lic"));
 // so a customer row can never be mistaken for a platform declaration.
 resource_id_type!(ServiceAccountId, InvalidResourceId, Some("svc"));
 resource_id_type!(ApiKeyId, InvalidResourceId, Some("key"));
+// F25 names `PluginPublisher` as a concept and org policy may allowlist
+// publishers by identity, so a publisher is a typed row rather than free text
+// an org could spell two ways.
+resource_id_type!(PluginPublisherId, InvalidResourceId, Some("pub"));
 resource_id_type!(PluginPackageId, InvalidResourceId, Some("pkg"));
 resource_id_type!(PluginVersionId, InvalidResourceId, Some("pvr"));
 resource_id_type!(PluginInstallId, InvalidResourceId, Some("pil"));
+resource_id_type!(PluginToolRegistrationId, InvalidResourceId, Some("ptr"));
 resource_id_type!(PluginQuarantineId, InvalidResourceId, Some("pqr"));
 // Platform operations. `stf_` is a named internal identity and `sgr_` is a
 // time-bounded grant against one customer organization. Neither is a customer
@@ -375,6 +380,32 @@ mod tests {
         assert!(ApprovalId::new("apr_0123456789abcdef0123456789abcdef").is_ok());
         assert!(ToolId::new("tool_0123456789abcdef0123456789abcdef").is_ok());
         assert!(RunId::new("rse_0123456789abcdef0123456789abcdef").is_err());
+    }
+
+    /// P07's typed ids exist so a platform row, an organization row, and a
+    /// credential row cannot be passed to each other's function. The swap tests
+    /// are the point: a `PluginInstallId` accepted where a `PluginPackageId` is
+    /// expected, or a `ServiceAccountId` accepted as a `UserId`, is the mistake
+    /// these types make a compile error.
+    #[test]
+    fn p07_resource_ids_keep_platform_org_and_credential_namespaces_apart() {
+        let hex = "0123456789abcdef0123456789abcdef";
+        assert!(PluginPublisherId::new(format!("pub_{hex}")).is_ok());
+        assert!(PluginPackageId::new(format!("pkg_{hex}")).is_ok());
+        assert!(PluginVersionId::new(format!("pvr_{hex}")).is_ok());
+        assert!(PluginInstallId::new(format!("pil_{hex}")).is_ok());
+        assert!(PluginToolRegistrationId::new(format!("ptr_{hex}")).is_ok());
+        assert!(PluginQuarantineId::new(format!("pqr_{hex}")).is_ok());
+        assert!(StaffPrincipalId::new(format!("stf_{hex}")).is_ok());
+        assert!(SupportGrantId::new(format!("sgr_{hex}")).is_ok());
+        assert!(KillSwitchId::new(format!("ksw_{hex}")).is_ok());
+
+        // A machine row is not a person, in either direction.
+        assert!(UserId::new(format!("svc_{hex}")).is_err());
+        assert!(ServiceAccountId::new(format!("usr_{hex}")).is_err());
+        // A platform quarantine is not an organization install.
+        assert!(PluginInstallId::new(format!("pqr_{hex}")).is_err());
+        assert!(PluginPackageId::new(format!("pil_{hex}")).is_err());
     }
 
     #[test]

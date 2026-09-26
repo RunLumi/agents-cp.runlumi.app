@@ -16,7 +16,8 @@
     "format:check": "oxfmt --check apps/web/src apps/web/vite.config.ts apps/web/index.html apps/web/package.json apps/web/components.json apps/web/tsconfig.json apps/api/package.json apps/api/scripts apps/api/wrangler.jsonc package.json pnpm-workspace.yaml .github/workflows/checks.yml && cargo fmt --all -- --check",
     "lint": "oxlint --type-aware apps/web/src apps/web/vite.config.ts",
     "typecheck": "pnpm --filter @runlumi/agents-cp-web typecheck",
-    "test": "pnpm --filter @runlumi/agents-cp-web test && cargo test --workspace",
+    "test": "pnpm --filter @runlumi/agents-cp-web test && cargo test --workspace && pnpm schema:p07",
+    "schema:p07": "node apps/api/scripts/p07-schema-invariants.mjs",
     "rust:check": "cargo clippy --workspace --all-targets -- -D warnings && cargo check --workspace --target wasm32-unknown-unknown",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm rust:check",
     "ui:add": "pnpm --filter @runlumi/agents-cp-web ui:add"

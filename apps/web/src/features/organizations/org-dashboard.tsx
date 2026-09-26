@@ -83,6 +83,20 @@ const UsageBudgetsPanel = lazy(() =>
   })),
 );
 
+// P07 enterprise identity and machine identity. Lazy like every other
+// substantive surface, so the initial route chunk is unaffected.
+const IdentityPanel = lazy(() =>
+  import("@/features/identity/identity-panel").then((module) => ({
+    default: module.IdentityPanel,
+  })),
+);
+
+const PluginsPanel = lazy(() =>
+  import("@/features/plugins/plugins-panel").then((module) => ({
+    default: module.PluginsPanel,
+  })),
+);
+
 interface OrgDashboardProps {
   me: MeResponse;
   onSignOut: () => void;
@@ -105,6 +119,8 @@ type Section =
   | "settings"
   | "billing"
   | "data"
+  | "identity"
+  | "plugins"
   | "account";
 
 const sections: { id: Section; label: string; icon: ComponentType<{ className?: string }> }[] = [
@@ -161,11 +177,27 @@ const sections: { id: Section; label: string; icon: ComponentType<{ className?: 
  * two settings areas, which is the confusion the grouping exists to remove. It
  * is relocated in the navigation only; the panel, its route segment, and its
  * permissions are unchanged.
+ *
+ * P07-CG §"Web information architecture" adds `Identity & access` and `Plugins`
+ * here, and adds no top-level nav item. F22's tree has no place for either, so
+ * these two are a recorded deviation rather than a licence to invent a location:
+ *
+ * - `Identity & access` holds service accounts and API keys. It is NOT called
+ *   `Security / Identity`, because in F22 that name means human sign-in and SSO,
+ *   and F06 is frozen and unimplemented — reusing it would promise a surface that
+ *   does not exist.
+ * - `Plugins` holds supply-chain governance. It sits beside `Credentials`
+ *   conceptually, because both concern what may act on the organization's behalf.
+ *
+ * Both are human-organization surfaces that use the existing Settings
+ * sub-navigation and breadcrumb, exactly as the P06 pages do.
  */
 const settingsPages: { id: Section; label: string; segment: string }[] = [
   { id: "billing", label: "Billing & entitlements", segment: "billing" },
   { id: "data", label: "Data & retention", segment: "data" },
   { id: "webhooks", label: "Webhooks", segment: "webhooks" },
+  { id: "identity", label: "Identity & access", segment: "identity" },
+  { id: "plugins", label: "Plugins", segment: "plugins" },
   { id: "account", label: "Account security", segment: "security" },
 ];
 
@@ -647,6 +679,29 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                   <ModelsRoutingPanel orgId={load.organization.org_id} membership={selected} />
                 ) : null}
                 {section === "account" ? <AccountSecurityPanel me={me} /> : null}
+                {section === "identity" ? (
+                  <Suspense fallback={<LoadingPanel label="Loading identity & access…" />}>
+                    {/* P07-CG: `service_accounts.read`/`manage` are admin-only, so a
+                        member or viewer is shown the refusal state rather than an
+                        empty credential list. The server enforces the same matrix
+                        independently. */}
+                    <IdentityPanel
+                      orgId={load.organization.org_id}
+                      {...(selected ? { role: selected.role } : {})}
+                    />
+                  </Suspense>
+                ) : null}
+                {section === "plugins" ? (
+                  <Suspense fallback={<LoadingPanel label="Loading plugins…" />}>
+                    {/* `plugins.read` is member-visible; `plugins.manage` is
+                        admin-only, because installing code is a supply-chain
+                        decision. */}
+                    <PluginsPanel
+                      orgId={load.organization.org_id}
+                      {...(selected ? { role: selected.role } : {})}
+                    />
+                  </Suspense>
+                ) : null}
               </>
             )}
           </div>

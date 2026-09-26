@@ -24,8 +24,8 @@ Every implementation agent reads, in order:
 | P04 | AI platform, catalog, secrets, inference | Implemented/review (`p04-cg-v1`; P04-IG conditional) |
 | P05 | Runs, tools, usage, control | Complete (`p05-cg-v1`, P05-IG conditional PASS) |
 | P06 | Automations, events, billing, data | Contract Gate frozen (`p06-cg-v1`); packets ready |
-| P07 | Enterprise, admin, plugins | Blocked by relevant P02/P05/P06 work |
-| P08 | LumiAgents migration and adoption | Blocked by relevant P03-P07 work |
+| P07 | Enterprise, admin, plugins | Implementation complete (`p07-cg-v1`; P07-IG PASS WITH FOLLOW-UP). F06 and the internal ops console frozen-not-built by coordinator decision |
+| P08 | LumiAgents migration and adoption | Blocked by relevant P03-P07 work; P07's INT seams are server-side only |
 | P09 | Hardening and release | Blocked by MVP implementation |
 
 The live execution state is in `STATUS.md`. Only the coordinator should update that file.
