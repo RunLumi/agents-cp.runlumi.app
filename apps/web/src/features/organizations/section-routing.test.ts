@@ -33,7 +33,32 @@ describe("sectionFromPath", () => {
   it("resolves a settings sub-page to its panel", () => {
     expect(sectionFromPath(`/org/${SLUG}/settings/billing`)).toBe("billing");
     expect(sectionFromPath(`/org/${SLUG}/settings/data`)).toBe("data");
+    expect(sectionFromPath(`/org/${SLUG}/settings/webhooks`)).toBe("webhooks");
     expect(sectionFromPath(`/org/${SLUG}/settings/security`)).toBe("account");
+  });
+
+  /**
+   * F22's tree, encoded.
+   *
+   * `docs/specs/f22-web-control-plane-ux-information-architecture.md` puts
+   * Billing, Data / Retention, AND Webhooks all under Settings, with
+   * `Integrations / MCP` as a separate top-level item. An earlier revision of
+   * the shell promoted webhooks to the top level and renamed it
+   * "Integrations / MCP" on the strength of a "Go to Integrations/MCP ->" link
+   * in `lumi_billing_overview.webp` — but that link is about connecting a
+   * provider billing account, which is an integration, not an outbound webhook.
+   * The spec settles it, and these assertions exist so the mistake cannot be
+   * reintroduced by reading the same screenshot again.
+   */
+  it("keeps all three P06 settings surfaces under Settings, per F22", () => {
+    for (const page of ["billing", "data", "webhooks"] as const) {
+      expect(isSettingsSection(page)).toBe(true);
+    }
+    // `Integrations / MCP` is a different top-level destination in F22's tree.
+    // Nothing in this codebase is the MCP surface yet, so there is correctly no
+    // nav item claiming the name — and webhooks must not be standing in for it.
+    expect(isSettingsSection("webhooks")).toBe(true);
+    expect(pathForSection(SLUG, "webhooks")).toBe(`/org/${SLUG}/settings/webhooks`);
   });
 
   /**
@@ -72,6 +97,7 @@ describe("sectionFromPath", () => {
   it("still accepts the pre-grouping flat path for a settings sub-page", () => {
     expect(sectionFromPath(`/org/${SLUG}/billing`)).toBe("billing");
     expect(sectionFromPath(`/org/${SLUG}/data`)).toBe("data");
+    expect(sectionFromPath(`/org/${SLUG}/webhooks`)).toBe("webhooks");
     expect(sectionFromPath(`/org/${SLUG}/account`)).toBe("account");
   });
 
@@ -121,6 +147,7 @@ describe("pathForSection", () => {
   it("nests settings sub-pages under the group", () => {
     expect(pathForSection(SLUG, "billing")).toBe(`/org/${SLUG}/settings/billing`);
     expect(pathForSection(SLUG, "data")).toBe(`/org/${SLUG}/settings/data`);
+    expect(pathForSection(SLUG, "webhooks")).toBe(`/org/${SLUG}/settings/webhooks`);
     expect(pathForSection(SLUG, "account")).toBe(`/org/${SLUG}/settings/security`);
   });
 
@@ -139,11 +166,13 @@ describe("isSettingsSection", () => {
   it("is true only for the group's own sub-pages, not the group itself", () => {
     expect(isSettingsSection("billing")).toBe(true);
     expect(isSettingsSection("data")).toBe(true);
+    expect(isSettingsSection("webhooks")).toBe(true);
     expect(isSettingsSection("account")).toBe(true);
     // The group landing is not a sub-page of itself, and top-level sections are
     // not settings at all.
     expect(isSettingsSection("settings")).toBe(false);
     expect(isSettingsSection("overview")).toBe(false);
     expect(isSettingsSection("policy")).toBe(false);
+    expect(isSettingsSection("automations")).toBe(false);
   });
 });

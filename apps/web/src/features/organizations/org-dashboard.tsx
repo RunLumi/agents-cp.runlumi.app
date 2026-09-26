@@ -120,12 +120,6 @@ const sections: { id: Section; label: string; icon: ComponentType<{ className?: 
   // is a scheduled way to start one; the rest are organization configuration.
   { id: "automations", label: "Automations", icon: IconRun },
   { id: "devices", label: "Devices", icon: IconUsers },
-  // Named for the reference, not for this panel's contents. `lumi_billing_overview`
-  // and `lumi_plan_entitlements` both send the reader to "Integrations/MCP" to
-  // connect a provider, and outbound webhooks are the other half of that same
-  // connection story. A label of "Webhooks & alerts" described this panel's
-  // current contents and would have been wrong the moment MCP landed.
-  { id: "webhooks", label: "Integrations / MCP", icon: IconToolShield },
   { id: "policy", label: "Policy", icon: IconShieldLock },
   { id: "settings", label: "Settings", icon: IconShieldLock },
 ];
@@ -133,23 +127,45 @@ const sections: { id: Section; label: string; icon: ComponentType<{ className?: 
 /**
  * The Settings group's sub-pages.
  *
- * WHY these are grouped: `docs/screens/lumi_plan_entitlements.webp` is
- * breadcrumbed `Settings > Billing plan and entitlements` and
- * `lumi_export_history.webp` is breadcrumbed
- * `Lumi Workspace > Settings > Data & Retention > Export history`. Both P06
- * surfaces are Settings sub-pages in the reference, and shipping them as two
- * more top-level nav items put commercial and data-governance configuration at
- * the same level as Projects and Devices.
+ * `docs/specs/f22-web-control-plane-ux-information-architecture.md` is the
+ * authority here, and its tree is explicit:
  *
- * `account` moved in with them. That surface is not P06's, but leaving it as a
- * top-level item next to a new Settings group would have produced two settings
- * areas, which is the confusion the grouping exists to remove. It is relocated
- * in the navigation only; the panel, its route segment, and its permissions are
- * unchanged.
+ * ```text
+ * ├── Integrations / MCP
+ * └── Settings
+ *     ├── General
+ *     ├── Security / Identity
+ *     ├── Credentials
+ *     ├── Billing
+ *     ├── Data / Retention
+ *     └── Webhooks
+ * ```
+ *
+ * So all THREE P06 settings surfaces belong under Settings — billing, data
+ * retention, and webhooks — and `Integrations / MCP` is a SEPARATE top-level
+ * item, not the name for the webhook panel. An earlier revision of this change
+ * read `lumi_billing_overview.webp`'s "Go to Integrations/MCP ->" as putting
+ * webhooks there; that link is about connecting a provider billing account,
+ * which is an integration, not an outbound webhook. The spec settles it.
+ *
+ * The design references agree: `lumi_plan_entitlements.webp` is breadcrumbed
+ * `Settings > Billing plan and entitlements` and `lumi_export_history.webp` is
+ * `Lumi Workspace > Settings > Data & Retention > Export history`.
+ *
+ * Sub-pages that F22 lists but this codebase does not have yet — General,
+ * Credentials — are simply absent rather than stubbed. A nav item pointing at
+ * nothing is worse than a missing one.
+ *
+ * `account` is the existing Security / Identity surface. It moved in from the
+ * top level because leaving it beside a new Settings group would have produced
+ * two settings areas, which is the confusion the grouping exists to remove. It
+ * is relocated in the navigation only; the panel, its route segment, and its
+ * permissions are unchanged.
  */
 const settingsPages: { id: Section; label: string; segment: string }[] = [
   { id: "billing", label: "Billing & entitlements", segment: "billing" },
   { id: "data", label: "Data & retention", segment: "data" },
+  { id: "webhooks", label: "Webhooks", segment: "webhooks" },
   { id: "account", label: "Account security", segment: "security" },
 ];
 

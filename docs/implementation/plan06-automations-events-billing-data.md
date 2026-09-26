@@ -302,6 +302,23 @@ blocks the Integration Gate; all three would need `CR-004` or later to change.
   Canonical values are already published in `@zcode/shared`. The affected files
   are outside P06's write surface. Detail in `handoffs/P06-INT-01.md`.
 
+### F22 information-architecture conformance
+
+`docs/specs/f22-web-control-plane-ux-information-architecture.md` is the
+authority on the org navigation tree, and the P06 surfaces now match it:
+
+- `Automations` is a top-level nav item.
+- `Billing`, `Data / Retention`, and `Webhooks` are Settings sub-pages at
+  `/org/{slug}/settings/{billing,data,webhooks}`, with `Security / Identity`
+  alongside them.
+- `Integrations / MCP` is a separate top-level item in F22's tree. This
+  codebase has no MCP or provider-connection surface, so no nav item claims the
+  name. `Tools & approvals` is the likely future occupant; renaming or moving it
+  is outside P06's write surface.
+
+F22's `General` and `Credentials` sub-pages are absent rather than stubbed. A
+nav item pointing at nothing is worse than a missing one.
+
 ### Frontend verification still owed
 
 No P06 surface has been rendered in a browser; none is attached to this session

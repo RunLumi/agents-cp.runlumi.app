@@ -162,7 +162,34 @@ ones were read and acted on.
 | --- | --- |
 | `docs/screens/lumi_export_history.webp` | Data & Retention is ONE page with four tabs — Retention policies, Export history, Data controls, Deletion requests — not four stacked surfaces. Breadcrumb `Lumi Workspace › Settings › Data & Retention › Export history`. |
 | `docs/screens/lumi_plan_entitlements.webp` | Billing is a two-column card grid: Plan & entitlements beside Subscription state and Payment provider status, then Included capabilities beside Usage vs. plan limits. Breadcrumb `Settings › Billing plan and entitlements`. Four inputs are separated by card adjacency and per-card copy, not by a leading definition list. |
-| `docs/screens/lumi_billing_overview.webp` | The provider connection lives under `Integrations / MCP` ("Go to Integrations/MCP →"), which is where the webhooks surface belongs. |
+
+**`docs/specs/f22-web-control-plane-ux-information-architecture.md` outranks all
+three.** Its information-architecture tree is explicit, and the navigation change
+was made to match it:
+
+```text
+├── Automations
+├── Integrations / MCP
+└── Settings
+    ├── General
+    ├── Security / Identity
+    ├── Credentials
+    ├── Billing
+    ├── Data / Retention
+    └── Webhooks
+```
+
+All three P06 settings surfaces — billing, data retention, webhooks — are
+Settings sub-pages, at `/org/{slug}/settings/{billing,data,webhooks,security}`.
+`Integrations / MCP` is a **separate** top-level destination that this codebase
+has no surface for yet, so there is no nav item claiming the name.
+
+An earlier revision of this change got that wrong. It read
+`lumi_billing_overview.webp`'s "Go to Integrations/MCP →" as placing the webhook
+panel at the top level under that name. That link is about connecting a provider
+billing account, which is an integration, not an outbound webhook. F22 settles
+it, and `section-routing.test.ts` now encodes the tree so the same screenshot
+cannot be misread a third time.
 
 ### Read for context, not copied
 
@@ -204,9 +231,15 @@ and webhooks layouts have had no external check at all.
   organization sidebar was chosen over restructuring the main grid.
 - **The reference nav is a later generation of the product IA** and was not
   adopted wholesale. It has no `Tools & approvals`, folds `Members` and `Teams`
-  into one item, and renames `Policy` to `Audit Log`. Those are P01–P05
-  surfaces and outside P06's write surface. The three placements that concern
-  P06's own surfaces were changed; the rest are recorded as follow-ups.
+  into one item, and renames `Policy` to `Audit Log`. F22 specifies the same
+  tree, so those are genuine gaps against the spec rather than only against the
+  screenshots — but all of them are P01–P05 surfaces and outside P06's write
+  surface. The placements that concern P06's own surfaces were changed; the rest
+  are recorded as follow-ups below.
+- **F22's `Integrations / MCP` has no nav item.** No surface in this codebase
+  is an MCP server list or a provider-connection page. `Tools & approvals` is
+  the likely future occupant, but renaming or moving it is not P06's call, and
+  pointing an empty item at nothing would be worse than omitting it.
 
 ## Known limitation: browser evidence is owed
 
