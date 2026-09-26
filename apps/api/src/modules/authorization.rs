@@ -545,6 +545,15 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::DataManage
                 | Permission::DataExport
                 | Permission::DataDelete
+                // P07: a credential is an ownership-level act, so only owners and
+                // admins reach `service_accounts.*`. Installing third-party code
+                // is a supply-chain decision, so `plugins.manage` is admin-only
+                // for the same reason. Members and viewers get the read-only
+                // `plugins.read` below.
+                | Permission::ServiceAccountsRead
+                | Permission::ServiceAccountsManage
+                | Permission::PluginsRead
+                | Permission::PluginsManage
         ),
         MembershipRole::Member => matches!(
             permission,
@@ -577,6 +586,10 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::NotificationsManage
                 | Permission::EntitlementsRead
                 | Permission::DataRead
+                // P07: a member may see which plugins exist and why a tool is
+                // denied — that is diagnostic value and costs nothing. They may
+                // not install, approve, pin, or block one.
+                | Permission::PluginsRead
         ),
         MembershipRole::Viewer => matches!(
             permission,
@@ -603,6 +616,11 @@ fn role_allows(role: MembershipRole, permission: &Permission) -> bool {
                 | Permission::NotificationsRead
                 | Permission::EntitlementsRead
                 | Permission::DataRead
+                // P07: `plugins.read` is member-visible because a member can see
+                // which tools exist and why a tool is denied. Nothing else in
+                // this phase is viewer-visible: service-account metadata names
+                // credentials, and a viewer has no business enumerating them.
+                | Permission::PluginsRead
         ),
     }
 }
@@ -939,5 +957,86 @@ mod tests {
                 "{code} must not resolve to a real permission"
             );
         }
+    }
+
+    /// P07-CG reserves F06's `identity.read` / `identity.manage` without adding
+    /// them to the enum. F06 is frozen-not-built, so a permission that named it
+    /// would create a route shape promising an SSO surface the product does not
+    /// have.
+    #[test]
+    fn p07_adds_no_permission_for_the_frozen_only_f06_surface() {
+        for code in [
+            "identity.read",
+            "identity.manage",
+            "sso.manage",
+            "scim.manage",
+        ] {
+            assert!(
+                matches!(Permission::parse(code), Permission::Unknown(_)),
+                "{code} must not resolve until F06 is implemented"
+            );
+        }
+    }
+
+    /// P07-CG freezes the P07 role matrix, and this test is why the matrix is
+    /// not a convention.
+    ///
+    /// The four P07 permissions were added to the enum in the foundation PR
+    /// WITHOUT being added to `role_allows`, and because `Owner` is written as
+    /// "everything except unknown", every owner-bound route still worked. The
+    /// defect was invisible: an admin could not read or manage a service
+    /// account, and no role but owner could read the plugin surface at all. A
+    /// role that silently receives nothing is the same failure as a role that
+    /// silently receives everything, and only an explicit per-role test finds
+    /// it.
+    #[test]
+    fn p07_roles_keep_credential_and_plugin_authority_separate() {
+        let (user, org, user_id, membership_id) = principal(true);
+        let organization = OrganizationContext {
+            organization_id: org.clone(),
+            state: OrganizationState::Active,
+            version: 1,
+        };
+        let allow = |permission: &Permission, role: MembershipRole| {
+            let membership =
+                make_membership(org.clone(), user_id.clone(), membership_id.clone(), role);
+            authorize(
+                Some(&user),
+                &organization,
+                Some(&membership),
+                permission,
+                None,
+            )
+            .is_allowed()
+        };
+
+        // Owner and admin both administer credentials and the plugin surface.
+        for role in [MembershipRole::Owner, MembershipRole::Admin] {
+            assert!(allow(&Permission::ServiceAccountsRead, role));
+            assert!(allow(&Permission::ServiceAccountsManage, role));
+            assert!(allow(&Permission::PluginsRead, role));
+            assert!(allow(&Permission::PluginsManage, role));
+        }
+
+        // A member may read plugins and nothing else in P07.
+        assert!(allow(&Permission::PluginsRead, MembershipRole::Member));
+        assert!(!allow(&Permission::PluginsManage, MembershipRole::Member));
+        assert!(!allow(
+            &Permission::ServiceAccountsRead,
+            MembershipRole::Member
+        ));
+        assert!(!allow(
+            &Permission::ServiceAccountsManage,
+            MembershipRole::Member
+        ));
+
+        // A viewer may read plugins — that is the diagnostic value F25 names —
+        // and may not enumerate credentials.
+        assert!(allow(&Permission::PluginsRead, MembershipRole::Viewer));
+        assert!(!allow(&Permission::PluginsManage, MembershipRole::Viewer));
+        assert!(!allow(
+            &Permission::ServiceAccountsRead,
+            MembershipRole::Viewer
+        ));
     }
 }
