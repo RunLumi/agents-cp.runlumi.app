@@ -72,9 +72,60 @@ function render(): string {
   );
 }
 
-/** Rendered copy with HTML entity escaping undone, so assertions read as copy. */
-function renderText(): string {
-  return render()
+/** The same snapshot, but with the server reporting one resource over limit. */
+const overLimitEntitlements = decodeEntitlementProjection({
+  org_id: ORG_ID,
+  plan_key: "team",
+  status: "grace",
+  policy_fresh_until: "2026-09-25T16:15:00.000Z",
+  offline_valid_until: "2026-10-02T12:00:00.000Z",
+  entitlements: [
+    { key: "org.max_members", value: 25, source: "plan" },
+    { key: "automations.max_active", value: 100, source: "plan" },
+  ],
+  over_limit: [
+    {
+      entitlement_key: "automations.max_active",
+      limit: 100,
+      current: 118,
+      over_by: 18,
+      seat_based: false,
+      remediation: [],
+    },
+  ],
+});
+
+const overLimitSnapshot: BillingSnapshot = { ...snapshot, entitlements: overLimitEntitlements };
+
+function renderOverLimit(): string {
+  const overLimitApi: BillingApi = {
+    ...api,
+    getEntitlements: async () => overLimitEntitlements,
+  };
+  return renderToStaticMarkup(
+    createElement(BillingPanel, {
+      orgId: ORG_ID,
+      api: overLimitApi,
+      initialData: overLimitSnapshot,
+      canManage: true,
+    }),
+  );
+}
+
+/**
+ * Rendered copy with HTML entity escaping undone, so assertions read as copy.
+ *
+ * The `<!-- -->` strip matters: React's server renderer inserts a comment
+ * between adjacent text children so a browser cannot merge two separately
+ * rendered strings into one word. Interpolated copy like
+ * `{counted} counted limit{s} on this plan` therefore arrives as
+ * `2<!-- --> counted limits<!-- --> on this plan`. Leaving the markers in makes
+ * every assertion about a number that touches interpolation fail for a reason
+ * that has nothing to do with the behaviour under test.
+ */
+function renderTextOf(html: string): string {
+  return html
+    .replaceAll("<!-- -->", "")
     .replaceAll("&#x27;", "'")
     .replaceAll("&amp;", "&")
     .replaceAll("&quot;", '"')
@@ -82,11 +133,26 @@ function renderText(): string {
     .replaceAll("&gt;", ">");
 }
 
+function renderText(): string {
+  return renderTextOf(render());
+}
+
 describe("billing panel rendered output", () => {
-  it("renders the four decision inputs as four distinct labelled sections", () => {
+  /**
+   * WHY this asserts ORDER and VISIBLE COPY, not just presence.
+   *
+   * The four inputs were originally a leading definition list. The reference
+   * moves that explanation to the end of the page, so the terms still render —
+   * but a presence-only assertion would have passed just as happily against the
+   * old leading position, which is the thing that changed. Asserting the
+   * heading appears after the plan summary pins the hierarchy the reference
+   * asks for, and asserting the four `term` / `doesNot` pairs keeps each input
+   * still saying what it is not.
+   */
+  it("states the four decision inputs as distinct terms, after the plan summary", () => {
     const html = render();
 
-    expect(html).toContain("Four separate decision inputs");
+    expect(html).toContain("Four separate inputs, never merged");
     for (const term of [
       "Authorization permission",
       "Lumi product entitlement",
@@ -96,6 +162,36 @@ describe("billing panel rendered output", () => {
       expect(html).toContain(term);
     }
     expect(html).toContain("It does not grant or revoke a Lumi entitlement");
+
+    // The plan leads; the disambiguation trails.
+    expect(html.indexOf("Your current plan")).toBeGreaterThan(-1);
+    expect(html.indexOf("Four separate inputs, never merged")).toBeGreaterThan(
+      html.indexOf("Your current plan"),
+    );
+  });
+
+  /**
+   * WHY the separation is asserted structurally, not only in prose.
+   *
+   * "Plan details control product entitlements, not payment status" is the one
+   * sentence the reference uses to keep a product plan from being read as a
+   * payment status, and the subscription card is scoped the same way. If either
+   * is dropped, the page starts implying that a lapsed payment method decides
+   * what the product includes — which is the precise confusion P06-CR-002
+   * exists to prevent.
+   */
+  it("keeps the product plan and the payment provider in separate, scoped cards", () => {
+    const html = render();
+
+    expect(html).toContain("Plan details control product entitlements, not payment status");
+    expect(html).toContain("Subscription state");
+    expect(html).toContain("product subscription state in Lumi Agents");
+    expect(html).toContain("Billing is managed by our secure payment provider");
+
+    // Three distinct surfaces, so no card can be mistaken for another.
+    expect(html).toContain('aria-label="Plan and entitlements"');
+    expect(html).toContain('aria-label="Subscription summary"');
+    expect(html).toContain('aria-label="Upstream provider account status"');
   });
 
   it("makes the grace window unmistakable and says what stops when it ends", () => {
@@ -183,9 +279,57 @@ describe("billing panel rendered output", () => {
   });
 
   it("reports how many entitlement keys and counted limits the projection carries", () => {
+    // These numbers used to live in one trailing footnote. They now sit in the
+    // two cards that actually use them — the plan summary and the usage
+    // comparison — so the test follows the numbers to their new home rather
+    // than asserting a sentence that no longer exists.
     const text = renderText();
 
-    expect(text).toContain("This projection reports 6 entitlement keys, of which 2 are counted");
+    expect(text).toContain("Entitlement keys");
+    expect(text).toContain("Counted limits");
+    expect(text).toContain("2 counted limits on this plan");
+  });
+
+  /**
+   * WHY the affordance is conditional.
+   *
+   * `docs/screens/lumi_plan_entitlements.webp` puts "Review over-limit
+   * resources →" in the Usage vs. plan limits header. It is rendered only when
+   * the server actually reported something over limit, because the target
+   * region is mounted under the same condition. An always-present affordance
+   * would either point at nothing or silently do nothing — and an affordance
+   * that looks actionable but is not is worse than no affordance.
+   */
+  it("offers the over-limit review only when something is over limit", () => {
+    const withinPlan = render();
+    expect(withinPlan).not.toContain("Review over-limit resources");
+    // Nothing over limit means the region is not mounted, so there is nothing
+    // for the affordance to point at.
+    expect(withinPlan).not.toContain('id="billing-over-limit"');
+
+    const overLimit = renderOverLimit();
+    expect(overLimit).toContain("Review over-limit resources");
+    // The target exists, and it is focusable so the jump lands somewhere a
+    // keyboard user can actually continue from.
+    expect(overLimit).toContain('id="billing-over-limit"');
+    expect(overLimit).toMatch(/id="billing-over-limit"[^>]*tabindex="-1"/);
+    // The real overage is reported with the server's numbers, not a paraphrase.
+    expect(overLimit).toContain("Over limit by 18");
+    expect(overLimit).toContain("Resources already over the current plan limit");
+  });
+
+  it("shows no current-usage figure the server did not publish", () => {
+    // The plan limit is published for every counted key; the current count is
+    // published only for the one resource the server found over. Rendering a 0
+    // for the rest would state the workspace has consumed nothing.
+    const text = renderTextOf(renderOverLimit());
+    expect(text).toContain("2 counted limits on this plan, 1 over limit");
+    expect(text).toContain(
+      "The server publishes a current count only for a resource already above its limit",
+    );
+    expect(text).toContain('A dash means "not published", never zero');
+    // Exactly one row carries a real figure: the one the server counted.
+    expect(text.match(/Over limit by 18/g) ?? []).toHaveLength(1);
   });
 
   it("offers no entitlement override control", () => {

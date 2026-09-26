@@ -42,9 +42,9 @@ export function SubscriptionSummary({
   return (
     <BillingPanel ariaLabel="Subscription summary">
       <BillingPanelHeader
-        eyebrow="LUMI SUBSCRIPTION"
-        title="Plan and subscription"
-        description="The commercial plan and the Lumi subscription state. Provider billing details are never shown here; the provider is adapter-private."
+        eyebrow="SUBSCRIPTION STATE"
+        title="Subscription state"
+        description="This shows your workspace\u2019s product subscription state in Lumi Agents, not your payment status. Provider billing details are never shown here; the provider is adapter-private."
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <BillingPill tone={STATUS_TONE[subscription.status]}>

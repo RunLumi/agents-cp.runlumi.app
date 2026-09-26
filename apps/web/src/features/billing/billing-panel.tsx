@@ -21,6 +21,7 @@ import { OverLimitProjectionPanel } from "./downgrade-projection";
 import { PlanChangePanel, type PlanActionOutcome } from "./plan-change";
 import { ProviderAccountCard } from "./provider-account-card";
 import { SubscriptionSummary } from "./subscription-summary";
+import { UsageVsPlanLimits } from "./usage-vs-limits";
 import {
   BillingDefinitionRow,
   BillingError,
@@ -295,6 +296,18 @@ export function BillingPanel({
     targetPlanKey: preview?.target_plan_key ?? "",
   });
 
+  // Whether anything on this page can talk about being over a limit. Drives
+  // both the over-limit region and the affordance that jumps to it, so the
+  // two can never disagree about whether there is anything to review.
+  const hasOverLimitSurface =
+    state.entitlements.data.over_limit.length > 0 || assessment.overLimit.length > 0;
+
+  const overLimitRegion = useRef<HTMLDivElement | null>(null);
+
+  const focusOverLimit = useCallback(() => {
+    overLimitRegion.current?.focus();
+  }, []);
+
   async function runPreview(planKey: string) {
     if (!client.previewPlanChange || planKey.length === 0) return;
     setPreviewRequested(true);
@@ -403,21 +416,74 @@ export function BillingPanel({
         </BillingNotice>
       ) : null}
 
-      <DecisionInputs />
+      {/*
+        WHY this grid: `docs/screens/lumi_plan_entitlements.webp` sets four
+        cards in a two-column arrangement — Plan & entitlements beside
+        Subscription state and Payment provider status, then Included
+        capabilities beside Usage vs. plan limits. The adjacency is the point:
+        it is what keeps "what the plan includes" from being read as "how much
+        is used", and it is what keeps a product subscription state from being
+        read as a payment status. This page shipped as one flat stack with a
+        leading definition list, which inverted the reference's hierarchy.
+      */}
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
+        <PlanEntitlementsCard planKey={currentPlanKey} projection={state.entitlements.data} />
 
-      <SubscriptionSummary
-        subscription={state.subscription.data}
-        license={license}
-        canManage={canManageBilling}
-        onRefresh={() => void load()}
-        refreshing={state.refreshing}
-      />
+        <div className="space-y-5">
+          <SubscriptionSummary
+            subscription={state.subscription.data}
+            license={license}
+            canManage={canManageBilling}
+            onRefresh={() => void load()}
+            refreshing={state.refreshing}
+          />
 
-      {state.entitlements.stale || state.entitlements.status === "error" ? (
-        <BillingError error={state.entitlements.error} onRetry={() => void load()} />
-      ) : null}
+          {state.provider.status === "loading" ? (
+            <BillingSurface ariaLabel="Upstream provider account status">
+              <BillingLoading label="Loading the upstream provider account projection…" rows={2} />
+            </BillingSurface>
+          ) : state.provider.status === "permission" ? (
+            <BillingSurface ariaLabel="Upstream provider account status">
+              <div className="p-5">
+                <BillingPermission message="Your current organization role cannot read the upstream provider account projection." />
+              </div>
+            </BillingSurface>
+          ) : state.provider.status === "error" ? (
+            <BillingSurface ariaLabel="Upstream provider account status">
+              <div className="p-5">
+                <BillingError error={state.provider.error} onRetry={() => void load()} />
+              </div>
+            </BillingSurface>
+          ) : state.provider.data ? (
+            <ProviderAccountCard
+              projection={state.provider.data}
+              observedStateStaleAfterSeconds={snapshot?.policy?.policy_fresh_seconds ?? null}
+            />
+          ) : (
+            <BillingSurface ariaLabel="Upstream provider account status">
+              <div className="p-5">
+                <BillingNotice tone="warning">
+                  The upstream provider account projection is unavailable. It is not a Lumi
+                  entitlement, and its absence grants nothing.
+                </BillingNotice>
+              </div>
+            </BillingSurface>
+          )}
+        </div>
 
-      <EntitlementTable projection={state.entitlements.data} onRefresh={() => void load()} />
+        <div className="space-y-3">
+          {state.entitlements.stale || state.entitlements.status === "error" ? (
+            <BillingError error={state.entitlements.error} onRetry={() => void load()} />
+          ) : null}
+
+          <EntitlementTable projection={state.entitlements.data} onRefresh={() => void load()} />
+        </div>
+
+        <UsageVsPlanLimits
+          projection={state.entitlements.data}
+          {...(hasOverLimitSurface ? { onReviewOverLimit: focusOverLimit } : {})}
+        />
+      </div>
 
       <LicenseCapabilityMatrix
         license={license}
@@ -428,59 +494,46 @@ export function BillingPanel({
         })}
       />
 
-      {state.provider.status === "loading" ? (
-        <BillingSurface ariaLabel="Upstream provider account status">
-          <BillingLoading label="Loading the upstream provider account projection…" rows={2} />
-        </BillingSurface>
-      ) : state.provider.status === "permission" ? (
-        <BillingSurface ariaLabel="Upstream provider account status">
-          <div className="p-5">
-            <BillingPermission message="Your current organization role cannot read the upstream provider account projection." />
-          </div>
-        </BillingSurface>
-      ) : state.provider.status === "error" ? (
-        <BillingSurface ariaLabel="Upstream provider account status">
-          <div className="p-5">
-            <BillingError error={state.provider.error} onRetry={() => void load()} />
-          </div>
-        </BillingSurface>
-      ) : state.provider.data ? (
-        <ProviderAccountCard
-          projection={state.provider.data}
-          observedStateStaleAfterSeconds={snapshot?.policy?.policy_fresh_seconds ?? null}
-        />
-      ) : (
-        <BillingSurface ariaLabel="Upstream provider account status">
-          <div className="p-5">
-            <BillingNotice tone="warning">
-              The upstream provider account projection is unavailable. It is not a Lumi entitlement,
-              and its absence grants nothing.
-            </BillingNotice>
-          </div>
-        </BillingSurface>
-      )}
+      {/*
+        The over-limit projections are the target of the "Review over-limit
+        resources" affordance in the Usage vs. plan limits header, so the
+        region is focusable and stays mounted whenever either projection has
+        something to say. `focus()` alone is used rather than
+        `scrollIntoView({ behavior: "smooth" })`: focusing a region already
+        brings it into view, and a scripted smooth scroll would be motion the
+        user did not ask for and that `prefers-reduced-motion` would have to
+        suppress.
+      */}
+      {hasOverLimitSurface ? (
+        <div
+          id="billing-over-limit"
+          ref={overLimitRegion}
+          tabIndex={-1}
+          className="scroll-mt-6 space-y-5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2"
+        >
+          {state.entitlements.data.over_limit.length > 0 ? (
+            <OverLimitProjectionPanel
+              assessment={assessPlanChange({
+                preview: null,
+                previewRequested: false,
+                previewFailed: false,
+                previewAvailable: true,
+                currentPlanKey,
+                targetPlanKey: currentPlanKey,
+              })}
+              title="Resources already over the current plan limit"
+              description="The server computed these counts from authoritative rows. New and expanded work above the limit is blocked until the count is inside it."
+            />
+          ) : null}
 
-      {state.entitlements.data.over_limit.length > 0 ? (
-        <OverLimitProjectionPanel
-          assessment={assessPlanChange({
-            preview: null,
-            previewRequested: false,
-            previewFailed: false,
-            previewAvailable: true,
-            currentPlanKey,
-            targetPlanKey: currentPlanKey,
-          })}
-          title="Resources already over the current plan limit"
-          description="The server computed these counts from authoritative rows. New and expanded work above the limit is blocked until the count is inside it."
-        />
-      ) : null}
-
-      {assessment.overLimit.length > 0 ? (
-        <OverLimitProjectionPanel
-          assessment={assessment}
-          title={`Preview of the change to ${assessment.targetPlanKey}`}
-          description="This is what the server would do if the change were submitted. Nothing has been applied yet."
-        />
+          {assessment.overLimit.length > 0 ? (
+            <OverLimitProjectionPanel
+              assessment={assessment}
+              title={`Preview of the change to ${assessment.targetPlanKey}`}
+              description="This is what the server would do if the change were submitted. Nothing has been applied yet."
+            />
+          ) : null}
+        </div>
       ) : null}
 
       <PlanChangePanel
@@ -520,10 +573,7 @@ export function BillingPanel({
         </BillingSurface>
       ) : null}
 
-      <LimitsAndBudgetsNote
-        countedLimits={countableLimits(state.entitlements.data.entitlements).length}
-        entitlementCount={state.entitlements.data.entitlements.length}
-      />
+      <HowThisPageDecides />
     </section>
   );
 }
@@ -547,8 +597,9 @@ function PanelHeading({
           Plan, subscription, and licensing
         </h1>
         <p className="mt-1 max-w-3xl text-sm text-[var(--muted-strong)]">
-          What the plan includes, what the current license state allows, and what a downgrade would
-          change. Four separate inputs decide this page, and they are never merged.
+          Your workspace plan, the capabilities it includes, your usage against those limits, your
+          license state, and the billing provider's status. Four separate inputs decide this page
+          and they are never merged — see the last card on this page.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -570,13 +621,112 @@ function PanelHeading({
   );
 }
 
-function DecisionInputs() {
+/**
+ * The lead card: `docs/screens/lumi_plan_entitlements.webp` opens with "Plan &
+ * entitlements", carrying the plan identity and the one sentence that keeps the
+ * product plan separate from payment status.
+ *
+ * WHY it summarises rather than re-lists: the plan's name, status and period are
+ * already in the Subscription state card beside it, and every entitlement value
+ * with its precedence-chain source is in the Included capabilities table below.
+ * Repeating either here would make the reader compare two copies of the same
+ * fact and trust neither. What is genuinely new at this level is the plan's
+ * REACH — how many capabilities it carries and how many of them are counted
+ * against a resource.
+ */
+function PlanEntitlementsCard({
+  planKey,
+  projection,
+}: {
+  planKey: string | null;
+  projection: EntitlementProjection;
+}) {
+  const keys = projection.entitlements.length;
+  const counted = countableLimits(projection.entitlements).length;
+
+  return (
+    <BillingSurface ariaLabel="Plan and entitlements">
+      <BillingPanelHeader
+        eyebrow={"PLAN & ENTITLEMENTS"}
+        title="Your current plan"
+        description="Your current workspace plan and what it includes. Plan details control product entitlements, not payment status."
+      />
+      <div className="space-y-4 p-5">
+        <dl className="grid gap-4 sm:grid-cols-3">
+          <SummaryField label="Plan" value={planKey ?? "Not reported"} mono />
+          <SummaryField label="Entitlement keys" value={String(keys)} tabular />
+          <SummaryField
+            label="Counted limits"
+            value={String(counted)}
+            tabular
+            hint="Limits the server counts a resource against."
+          />
+        </dl>
+
+        {keys === 0 ? (
+          <BillingNotice tone="warning">
+            No entitlement values were returned. An empty projection is not a statement that
+            everything is included — a protected capability with no value fails closed.
+          </BillingNotice>
+        ) : null}
+
+        <p className="text-xs leading-5 text-[var(--muted)]">
+          Each key is resolved by the precedence chain, and every value below is attributed to the
+          layer that set it. The capability list is the plan's reach; the usage comparison is
+          separate, and a usage total is never a plan total.
+        </p>
+      </div>
+    </BillingSurface>
+  );
+}
+
+function SummaryField({
+  label,
+  value,
+  hint,
+  mono = false,
+  tabular = false,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  mono?: boolean;
+  tabular?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium text-[var(--muted)]">{label}</dt>
+      <dd
+        className={`mt-1 truncate text-sm font-medium text-[var(--civic-navy)] ${
+          mono ? "font-mono" : ""
+        } ${tabular ? "tabular-nums" : ""}`}
+      >
+        {value}
+      </dd>
+      {hint ? <p className="mt-1 text-xs leading-4 text-[var(--muted)]">{hint}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * The four inputs, as a TRAILING card.
+ *
+ * WHY it moved: this block used to be the first thing on the page, under the
+ * eyebrow "HOW TO READ THIS PAGE". It is correct, and it was in the wrong place.
+ * A reader opening a billing page wants their plan, not a disambiguation lecture,
+ * and leading with the lecture buries the two numbers they came for. The
+ * reference's own bottom card — "Need to make changes?" — is the same shape of
+ * thing: terminal, full-width, secondary. The distinction is still stated, and
+ * each term still says what it does not decide, but it now sits where a careful
+ * reader finishes reading rather than where they start.
+ */
+function HowThisPageDecides() {
   return (
     <BillingSurface ariaLabel="Four separate decision inputs">
       <BillingPanelHeader
-        eyebrow="HOW TO READ THIS PAGE"
-        title="Four separate decision inputs"
-        description="Authorization, product entitlement, usage budget, and upstream provider account status are four different things. Collapsing them produces wrong answers, so this page keeps them apart."
+        eyebrow="HOW THIS PAGE DECIDES"
+        title="Four separate inputs, never merged"
+        description="Collapsing these produces wrong answers, so this page keeps them apart. Each one is decided somewhere else and can change without the others moving."
       />
       <dl className="px-5 py-1">
         {DECISION_INPUTS.map((item) => (
@@ -586,23 +736,6 @@ function DecisionInputs() {
         ))}
       </dl>
     </BillingSurface>
-  );
-}
-
-function LimitsAndBudgetsNote({
-  entitlementCount,
-  countedLimits,
-}: {
-  entitlementCount: number;
-  countedLimits: number;
-}) {
-  return (
-    <p className="text-xs leading-5 text-[var(--muted)]">
-      This projection reports {entitlementCount} entitlement key{entitlementCount === 1 ? "" : "s"},
-      of which {countedLimits} are counted limits. Current usage and budgets are measured and
-      enforced in the Usage &amp; Budgets section, which is a separate input from the plan. Nothing
-      on this page authorizes a request, and nothing on this page deletes data.
-    </p>
   );
 }
 

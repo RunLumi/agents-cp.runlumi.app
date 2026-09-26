@@ -51,7 +51,7 @@ export function ProviderAccountCard({
       <BillingPanelHeader
         eyebrow="UPSTREAM PROVIDER ACCOUNT — NOT A LUMI ENTITLEMENT"
         title={humanizeStatus(projection.provider)}
-        description="A read-only status projection of an upstream AI provider account or coding plan. It is not a Lumi product entitlement, and it never grants or revokes one."
+        description="Billing is managed by our secure payment provider. This is a read-only status projection of that provider\u2019s account or coding plan. It is not a Lumi product entitlement, and it never grants or revokes one."
         action={
           <BillingPill tone={STATUS_TONE[projection.status]}>
             {humanizeStatus(projection.status)}
