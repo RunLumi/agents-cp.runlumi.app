@@ -9,6 +9,7 @@ mod error;
 mod event;
 mod idempotency;
 mod identifiers;
+mod machine;
 mod pagination;
 mod principal;
 mod timestamp;
@@ -21,16 +22,21 @@ pub use idempotency::{
     RequestFingerprint, StoredSuccess,
 };
 pub use identifiers::{
-    ActorId, AgentDefinitionId, AgentSessionId, ApprovalId, ArtifactRefId, AutomationId,
+    ActorId, AgentDefinitionId, AgentSessionId, ApiKeyId, ApprovalId, ArtifactRefId, AutomationId,
     BillingAccountId, BudgetId, BudgetReservationId, CapabilityId, CorrelationId, CostRecordId,
     CredentialId, DeviceAuthorizationId, DeviceEnrollmentId, DeviceId, EntitlementDefinitionId,
-    EntitlementGrantId, EventId, ExecutionLeaseId, IdentityId, InvitationId, LicenseSnapshotId,
-    ManagedDeviceId, McpRegistrationId, MembershipId, ModelAliasId, ModelId, OccurrenceId,
-    OrganizationId, PlanId, PolicyAckId, PolicySnapshotId, ProjectId, ProviderEndpointId,
+    EntitlementGrantId, EventId, ExecutionLeaseId, IdentityId, InvitationId, KillSwitchId,
+    LicenseSnapshotId, ManagedDeviceId, McpRegistrationId, MembershipId, ModelAliasId, ModelId,
+    OccurrenceId, OrganizationId, PlanId, PluginInstallId, PluginPackageId, PluginQuarantineId,
+    PluginVersionId, PolicyAckId, PolicySnapshotId, ProjectId, ProviderEndpointId,
     ProviderEntitlementProjectionId, ProviderId, RateLimitPolicyId, ReauthenticationGrantId,
     RequestId, ResourceId, RouteId, RouteVersionId, RunEventId, RunId, ScheduleRuleId,
-    SecurityEventId, SessionId, SubscriptionId, TeamId, TeamMemberId, ToolCallId, ToolId,
-    ToolPolicyId, UsageEventId, UsageRollupId, UserId, WorkspaceBindingId,
+    SecurityEventId, ServiceAccountId, SessionId, StaffPrincipalId, SubscriptionId, SupportGrantId,
+    TeamId, TeamMemberId, ToolCallId, ToolId, ToolPolicyId, UsageEventId, UsageRollupId, UserId,
+    WorkspaceBindingId,
+};
+pub use machine::{
+    MACHINE_KEY_SCHEME, MachineActor, MachineKey, MachineKeyError, constant_time_eq,
 };
 pub use pagination::{Cursor, Page};
 pub use principal::Principal;

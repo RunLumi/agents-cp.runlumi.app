@@ -202,6 +202,26 @@ resource_id_type!(SubscriptionId, InvalidResourceId, Some("sub"));
 resource_id_type!(EntitlementDefinitionId, InvalidResourceId, Some("ent"));
 resource_id_type!(EntitlementGrantId, InvalidResourceId, Some("egr"));
 resource_id_type!(LicenseSnapshotId, InvalidResourceId, Some("lic"));
+// P07-CG (p07-cg-v1) machine identity and plugin governance identifiers.
+//
+// `svc_`/`key_` are organization-owned machine rows. They are deliberately NOT
+// a `UserId` and deliberately NOT interchangeable with one: a service account
+// has no `users` row, so there is no code path that can treat a credential as a
+// person. The plugin prefixes are platform-owned catalog rows; the install,
+// policy, and registration rows are organization-owned and carry `pil_`/`ppl_`
+// so a customer row can never be mistaken for a platform declaration.
+resource_id_type!(ServiceAccountId, InvalidResourceId, Some("svc"));
+resource_id_type!(ApiKeyId, InvalidResourceId, Some("key"));
+resource_id_type!(PluginPackageId, InvalidResourceId, Some("pkg"));
+resource_id_type!(PluginVersionId, InvalidResourceId, Some("pvr"));
+resource_id_type!(PluginInstallId, InvalidResourceId, Some("pil"));
+resource_id_type!(PluginQuarantineId, InvalidResourceId, Some("pqr"));
+// Platform operations. `stf_` is a named internal identity and `sgr_` is a
+// time-bounded grant against one customer organization. Neither is a customer
+// row and neither can be reached with an organization session.
+resource_id_type!(StaffPrincipalId, InvalidResourceId, Some("stf"));
+resource_id_type!(SupportGrantId, InvalidResourceId, Some("sgr"));
+resource_id_type!(KillSwitchId, InvalidResourceId, Some("ksw"));
 
 /// Opaque actor/principal identifier supplied only by trusted identity context.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
