@@ -33,6 +33,7 @@ import {
 import { DataPolicyEditor } from "./data-policy";
 import { OrgDeletionWorkflow, PersonalDeletionWorkflow } from "./deletion-workflows";
 import { OrgExportWorkflow, PersonalExportWorkflow } from "./export-workflows";
+import { DataControls } from "./data-controls";
 import { RetentionSummary } from "./retention-summary";
 import {
   ErrorNotice,
@@ -41,7 +42,6 @@ import {
   PermissionState,
   Pill,
   Surface,
-  SurfaceHeader,
   TabNav,
   TabPanel,
 } from "./ui";
@@ -425,19 +425,7 @@ export function DataPanel({
       {tab === "controls" ? (
         <TabPanel id="controls" label="Data and retention">
           <div className="space-y-5">
-            <Surface ariaLabel="Data controls">
-              <SurfaceHeader
-                title="Data controls"
-                description="Where Lumi's own records live, and what the platform holds on your behalf."
-              />
-              <div className="p-5">
-                <p className="text-sm leading-6 text-[var(--muted-strong)]">
-                  Inference, usage, and audit records are governed by the retention and logging
-                  policy on the Retention policies tab. Export and deletion requests are managed
-                  from their own tabs.
-                </p>
-              </div>
-            </Surface>
+            {currentPolicy !== null ? <DataControls policy={currentPolicy} /> : null}
           </div>
         </TabPanel>
       ) : null}

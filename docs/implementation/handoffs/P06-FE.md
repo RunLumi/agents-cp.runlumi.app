@@ -179,6 +179,17 @@ ones were read and acted on.
 | Reference | What it decided |
 | --- | --- |
 | `docs/screens/lumi_export_history.webp` | Data & Retention is ONE page with four tabs — Retention policies, Export history, Data controls, Deletion requests — not four stacked surfaces. Breadcrumb `Lumi Workspace › Settings › Data & Retention › Export history`. |
+
+The four-tab split also forced a division of labour that was previously
+implicit. Retention policies owns the editor and the full 72-class registry
+with each class's owner, window, legal maximum, export behavior, and
+deletion behavior. **Data controls** owns what the platform is doing right
+now: logging mode, legal-hold state, backup lifecycle, export artifact
+lifetime, and upstream provider retention — read-only, because putting a
+second editor on the same page would give an operator two places to change
+one thing. The reference shows the tab but not its contents, so its content
+was derived from the frozen policy fields and every consequence sentence is
+quoted from the contract rather than authored as product copy.
 | `docs/screens/lumi_plan_entitlements.webp` | Billing is a two-column card grid: Plan & entitlements beside Subscription state and Payment provider status, then Included capabilities beside Usage vs. plan limits. Breadcrumb `Settings › Billing plan and entitlements`. Four inputs are separated by card adjacency and per-card copy, not by a leading definition list. |
 
 **`docs/specs/f22-web-control-plane-ux-information-architecture.md` outranks all
