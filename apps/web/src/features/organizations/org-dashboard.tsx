@@ -102,6 +102,7 @@ type Section =
   | "models"
   | "automations"
   | "webhooks"
+  | "settings"
   | "billing"
   | "data"
   | "account";
@@ -115,16 +116,99 @@ const sections: { id: Section; label: string; icon: ComponentType<{ className?: 
   { id: "tools", label: "Tools & approvals", icon: IconToolShield },
   { id: "models", label: "Models & routing", icon: IconRoute },
   { id: "usage", label: "Usage & budgets", icon: IconRoute },
-  { id: "devices", label: "Devices", icon: IconUsers },
-  { id: "policy", label: "Policy", icon: IconShieldLock },
   // P06 durable operations. Automations sits next to runs because an automation
   // is a scheduled way to start one; the rest are organization configuration.
   { id: "automations", label: "Automations", icon: IconRun },
-  { id: "webhooks", label: "Webhooks & alerts", icon: IconToolShield },
-  { id: "billing", label: "Plan & usage", icon: IconRoute },
-  { id: "data", label: "Data & retention", icon: IconShieldLock },
-  { id: "account", label: "Account security", icon: IconShieldLock },
+  { id: "devices", label: "Devices", icon: IconUsers },
+  // Named for the reference, not for this panel's contents. `lumi_billing_overview`
+  // and `lumi_plan_entitlements` both send the reader to "Integrations/MCP" to
+  // connect a provider, and outbound webhooks are the other half of that same
+  // connection story. A label of "Webhooks & alerts" described this panel's
+  // current contents and would have been wrong the moment MCP landed.
+  { id: "webhooks", label: "Integrations / MCP", icon: IconToolShield },
+  { id: "policy", label: "Policy", icon: IconShieldLock },
+  { id: "settings", label: "Settings", icon: IconShieldLock },
 ];
+
+/**
+ * The Settings group's sub-pages.
+ *
+ * WHY these are grouped: `docs/screens/lumi_plan_entitlements.webp` is
+ * breadcrumbed `Settings > Billing plan and entitlements` and
+ * `lumi_export_history.webp` is breadcrumbed
+ * `Lumi Workspace > Settings > Data & Retention > Export history`. Both P06
+ * surfaces are Settings sub-pages in the reference, and shipping them as two
+ * more top-level nav items put commercial and data-governance configuration at
+ * the same level as Projects and Devices.
+ *
+ * `account` moved in with them. That surface is not P06's, but leaving it as a
+ * top-level item next to a new Settings group would have produced two settings
+ * areas, which is the confusion the grouping exists to remove. It is relocated
+ * in the navigation only; the panel, its route segment, and its permissions are
+ * unchanged.
+ */
+const settingsPages: { id: Section; label: string; segment: string }[] = [
+  { id: "billing", label: "Billing & entitlements", segment: "billing" },
+  { id: "data", label: "Data & retention", segment: "data" },
+  { id: "account", label: "Account security", segment: "security" },
+];
+
+const TOP_LEVEL_SECTIONS: ReadonlySet<string> = new Set(
+  sections.map((entry) => entry.id as string),
+);
+
+/**
+ * Match a path token to a settings sub-page.
+ *
+ * Matches on the current segment OR the section id, because `/org/x/account` was
+ * this panel's address before the grouping and `/org/x/settings/security` is its
+ * address now. Both forms have to resolve or old links quietly become dead.
+ */
+function settingsPageForToken(token: string): Section | null {
+  return settingsPages.find((page) => page.segment === token || page.id === token)?.id ?? null;
+}
+
+/**
+ * Resolve a location pathname to a section.
+ *
+ * Exported for tests because deep links are the only way a bookmark, a
+ * notification, or the browser's back button reaches a section — and a wrong
+ * answer here silently drops the reader on Overview with no error. `/settings`
+ * with no sub-page resolves to the group landing rather than to a default
+ * sub-page, so the group itself is always a real, addressable destination.
+ */
+export function sectionFromPath(pathname: string): Section {
+  const segments = pathname.split("/").filter((part) => part.length > 0);
+  // Drop the leading `org` and the organization slug; what remains is the
+  // section, and optionally a settings sub-page.
+  const rest = segments[0] === "org" ? segments.slice(2) : segments;
+  const [head, tail, ...extra] = rest;
+
+  if (head === "settings") {
+    // A settings path addresses at most one sub-page. Anything deeper is
+    // malformed, and the group landing is the safer answer: it lists every
+    // sub-page, so a reader who followed a bad link can still get where they
+    // were going, whereas guessing a level would not.
+    if (tail === undefined || extra.length > 0) return "settings";
+    return settingsPageForToken(tail) ?? "settings";
+  }
+  if (head === undefined) return "overview";
+  if (TOP_LEVEL_SECTIONS.has(head)) return head as Section;
+  return settingsPageForToken(head) ?? "overview";
+}
+
+/** The addressable path for a section, so a deep link and a click agree. */
+export function pathForSection(slug: string, section: Section): string {
+  if (section === "settings") return `/org/${slug}/settings`;
+  const page = settingsPages.find((entry) => entry.id === section);
+  if (page) return `/org/${slug}/settings/${page.segment}`;
+  return `/org/${slug}/${section}`;
+}
+
+/** True when a section renders inside the Settings group. */
+export function isSettingsSection(section: Section): boolean {
+  return settingsPages.some((page) => page.id === section);
+}
 
 type LoadState =
   | { kind: "loading" }
@@ -133,25 +217,7 @@ type LoadState =
 
 export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashboardProps) {
   const [selectedId, setSelectedId] = useState(me.organizations[0]?.organization.org_id ?? "");
-  const [section, setSection] = useState<Section>(() => {
-    const path = window.location.pathname.split("/").at(-1);
-    return path === "members" ||
-      path === "teams" ||
-      path === "projects" ||
-      path === "runs" ||
-      path === "tools" ||
-      path === "usage" ||
-      path === "devices" ||
-      path === "policy" ||
-      path === "models" ||
-      path === "automations" ||
-      path === "webhooks" ||
-      path === "billing" ||
-      path === "data" ||
-      path === "account"
-      ? path
-      : "overview";
-  });
+  const [section, setSection] = useState<Section>(() => sectionFromPath(window.location.pathname));
   const [refreshKey, setRefreshKey] = useState(0);
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [showCreateOrg, setShowCreateOrg] = useState(me.organizations.length === 0);
@@ -217,6 +283,19 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [mobileNavOpen]);
 
+  // The back button. `navigate` pushes a history entry per section, so without
+  // this the browser would move the address bar while the panel stayed put — the
+  // worst kind of navigation bug, because it looks like it worked. Settings
+  // pushed two segments deep made this more visible, not less.
+  useEffect(() => {
+    const onPopState = () => {
+      setSection(sectionFromPath(window.location.pathname));
+      setMobileNavOpen(false);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   function refresh() {
     setRefreshKey((value) => value + 1);
   }
@@ -233,7 +312,8 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
   function navigate(next: Section) {
     setSection(next);
     setMobileNavOpen(false);
-    if (selected) window.history.pushState({}, "", `/org/${selected.organization.slug}/${next}`);
+    if (selected)
+      window.history.pushState({}, "", pathForSection(selected.organization.slug, next));
   }
 
   async function refreshOrganizations() {
@@ -377,6 +457,36 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
               <ErrorPanel error={load.error} onRetry={() => setSelectedId((value) => `${value}`)} />
             ) : (
               <>
+                <SectionBreadcrumb
+                  organizationName={load.organization.display_name}
+                  section={section}
+                  onNavigate={navigate}
+                />
+
+                {isSettingsSection(section) ? (
+                  <nav
+                    aria-label="Settings sections"
+                    className="mb-6 flex gap-1 overflow-x-auto border-b border-[var(--border)]"
+                  >
+                    {settingsPages.map((page) => (
+                      <button
+                        key={page.id}
+                        type="button"
+                        aria-current={section === page.id ? "page" : undefined}
+                        onClick={() => navigate(page.id)}
+                        className={[
+                          "-mb-px min-h-11 shrink-0 border-b-2 px-3 text-sm font-medium whitespace-nowrap outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2",
+                          section === page.id
+                            ? "border-[var(--lumi-blue)] text-[var(--civic-navy)]"
+                            : "border-transparent text-[var(--muted-strong)] hover:bg-[var(--panel-hover)] hover:text-[var(--civic-navy)]",
+                        ].join(" ")}
+                      >
+                        {page.label}
+                      </button>
+                    ))}
+                  </nav>
+                ) : null}
+
                 <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className="text-xs font-medium tracking-[0.08em] text-[var(--lumi-blue)]">
@@ -474,6 +584,9 @@ export function OrgDashboard({ me, onSignOut, onOrganizationsChanged }: OrgDashb
                       canDelete={canManage}
                     />
                   </Suspense>
+                ) : null}
+                {section === "settings" ? (
+                  <SettingsLanding onOpen={(page) => navigate(page)} />
                 ) : null}
                 {section === "billing" ? (
                   <Suspense fallback={<LoadingPanel label="Loading plan and usage…" />}>
@@ -938,6 +1051,130 @@ function CreateTeamDialog({
         </form>
       </section>
     </div>
+  );
+}
+
+/**
+ * Where the reader is, as a path of names.
+ *
+ * WHY this exists: both P06 references are breadcrumbed —
+ * `Settings > Billing plan and entitlements` and
+ * `Lumi Workspace > Settings > Data & Retention > Export history` — and the
+ * Settings grouping this change introduced makes a breadcrumb necessary rather
+ * than decorative. Without one, "Data & retention" and "Billing & entitlements"
+ * are two tabs of something unnamed.
+ *
+ * The trailing crumb is the current page and is not a control. Earlier crumbs
+ * ARE controls, because every one of them is a destination the reader can
+ * plausibly want to get back to, and a breadcrumb whose ancestors are plain text
+ * throws that away.
+ *
+ * The deepest level the shell owns is the settings sub-page. Data & Retention's
+ * own tab is panel state, not shell state, and is named by that panel's header
+ * rather than duplicated here.
+ */
+function SectionBreadcrumb({
+  organizationName,
+  section,
+  onNavigate,
+}: {
+  organizationName: string;
+  section: Section;
+  onNavigate: (next: Section) => void;
+}) {
+  const topLevel = sections.find((entry) => entry.id === section);
+  const inSettings = isSettingsSection(section);
+  const subPage = settingsPages.find((page) => page.id === section);
+
+  return (
+    <nav aria-label="Breadcrumb" className="mb-4">
+      <ol className="flex flex-wrap items-center gap-1 text-sm text-[var(--muted)]">
+        <li>
+          <button
+            type="button"
+            onClick={() => onNavigate("overview")}
+            className="rounded px-1 py-0.5 outline-none transition hover:text-[var(--civic-navy)] focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+          >
+            {organizationName}
+          </button>
+        </li>
+        {inSettings ? (
+          <>
+            <CrumbDivider />
+            <li>
+              <button
+                type="button"
+                onClick={() => onNavigate("settings")}
+                className="rounded px-1 py-0.5 outline-none transition hover:text-[var(--civic-navy)] focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              >
+                Settings
+              </button>
+            </li>
+            {subPage ? (
+              <>
+                <CrumbDivider />
+                <li aria-current="page" className="px-1 py-0.5 text-[var(--civic-navy)]">
+                  {subPage.label}
+                </li>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <CrumbDivider />
+            <li aria-current="page" className="px-1 py-0.5 text-[var(--civic-navy)]">
+              {topLevel?.label ?? "Overview"}
+            </li>
+          </>
+        )}
+      </ol>
+    </nav>
+  );
+}
+
+function CrumbDivider() {
+  return (
+    <li aria-hidden="true" className="px-0.5 text-[var(--muted)]">
+      /
+    </li>
+  );
+}
+
+/**
+ * The Settings group's landing page.
+ *
+ * `/settings` with no sub-page is a real, addressable destination rather than a
+ * redirect, so a bare link resolves to something with a title instead of
+ * silently picking a default sub-page on the reader's behalf.
+ */
+function SettingsLanding({ onOpen }: { onOpen: (page: Section) => void }) {
+  return (
+    <section aria-label="Settings" className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--civic-navy)]">Settings</h2>
+        <p className="mt-1 max-w-3xl text-sm text-[var(--muted-strong)]">
+          Commercial, data-governance, and account configuration for this organization. Each area
+          enforces its own permissions; the server decides independently what the current role may
+          read or change.
+        </p>
+      </div>
+      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {settingsPages.map((page) => (
+          <li key={page.id}>
+            <button
+              type="button"
+              onClick={() => onOpen(page.id)}
+              className="flex min-h-16 w-full items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-4 py-3 text-left text-sm font-medium text-[var(--civic-navy)] shadow-[var(--shadow)] outline-none transition hover:border-[var(--lumi-blue)]/40 hover:bg-[var(--lumi-blue-soft)] focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2"
+            >
+              {page.label}
+              <span aria-hidden="true" className="text-[var(--muted)]">
+                &rarr;
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
