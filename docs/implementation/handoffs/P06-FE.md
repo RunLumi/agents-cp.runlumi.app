@@ -142,6 +142,67 @@ a DOM test dependency.** That is a deliberate decision for a follow-up, not
 something to slip in at the end of a phase. It is named here rather than
 papered over with a test that cannot fail.
 
+## Screen references used
+
+`AGENTS.md` requires opening the relevant images in `docs/screens/` before
+frontend work and comparing the result against them. An earlier revision of
+this handoff claimed `docs/screens/` held no reference for any of the four P06
+surfaces. **That claim was wrong**, and it was the reason the information
+architecture shipped wrong. `docs/screens/` contains 24 images; the relevant
+ones were read and acted on.
+
+### Directly relevant, and acted on
+
+| Reference | What it decided |
+| --- | --- |
+| `docs/screens/lumi_export_history.webp` | Data & Retention is ONE page with four tabs — Retention policies, Export history, Data controls, Deletion requests — not four stacked surfaces. Breadcrumb `Lumi Workspace › Settings › Data & Retention › Export history`. |
+| `docs/screens/lumi_plan_entitlements.webp` | Billing is a two-column card grid: Plan & entitlements beside Subscription state and Payment provider status, then Included capabilities beside Usage vs. plan limits. Breadcrumb `Settings › Billing plan and entitlements`. Four inputs are separated by card adjacency and per-card copy, not by a leading definition list. |
+| `docs/screens/lumi_billing_overview.webp` | The provider connection lives under `Integrations / MCP` ("Go to Integrations/MCP →"), which is where the webhooks surface belongs. |
+
+### Read for context, not copied
+
+`lumi_account.webp` is the **personal** account surface with its own shell and
+left rail (Profile / Security / Sessions & devices / Security activity). It is
+not the organization Settings page, so it was not treated as one. It does
+confirm the pattern that a settings area is a group with sub-navigation.
+
+### No reference exists
+
+**Automations and Integrations / MCP (webhooks) have no reference anywhere in
+`docs/screens/`.** All 24 images are billing, account, rate-limit, models, or
+budget screens. Those two panels were built from the density and tokens of
+`runs-panel.tsx` and `policy-panel.tsx`. That is a gap in the screen library,
+stated here rather than glossed, and it is a genuine one: it means the automations
+and webhooks layouts have had no external check at all.
+
+### Deviations from the references, and why
+
+- **The org heading is kept.** The references' content pages open with a
+  breadcrumb and go straight to the page `<h1>`, repeating neither the
+  workspace nor the organization. The shell keeps its organization heading
+  because it also carries the organization slug, its lifecycle state, and the
+  contextual action button, none of which the breadcrumb can hold.
+- **`Included capabilities` keeps its provenance columns.** The reference's
+  table is `Capability | Included`. The shipped table adds the stable key and
+  the precedence-chain layer that set each value. P06-CR-002 requires the
+  attribution to be visible, and dropping it to match a two-column reference
+  would have removed a frozen-contract requirement to satisfy a layout
+  suggestion.
+- **No plan marketing copy was invented.** The reference's Plan & entitlements
+  card shows a plan name, a one-line tagline, and three feature bullets. The
+  frozen contract has no plan catalog, so the shipped card shows the plan key
+  and the plan's reach — entitlement key count and counted-limit count — and
+  says nothing about who the plan is for.
+- **The Settings sub-navigation is horizontal.** The reference's org Settings
+  screenshots show no sub-nav on the billing page, and the personal account
+  shell uses a left rail. A horizontal sub-nav inside the existing 232px
+  organization sidebar was chosen over restructuring the main grid.
+- **The reference nav is a later generation of the product IA** and was not
+  adopted wholesale. It has no `Tools & approvals`, folds `Members` and `Teams`
+  into one item, and renames `Policy` to `Audit Log`. Those are P01–P05
+  surfaces and outside P06's write surface. The three placements that concern
+  P06's own surfaces were changed; the rest are recorded as follow-ups.
+
 ## Known limitation: browser evidence is owed
 
 **No P06 surface has been visually verified in a browser.** No desktop browser
@@ -151,13 +212,24 @@ is attached to this session — `browser.*` reports
 Each packet substituted `renderToStaticMarkup` assertions over the real
 component tree, which is stronger evidence for the honesty requirements than a
 screenshot would be, but it is not a substitute for the checks `AGENTS.md`
-requires: desktop and narrow layout, keyboard focus order, focus-ring
-visibility, and comparison against `docs/screens/`.
+requires: desktop and narrow layout, keyboard focus order, and focus-ring
+visibility.
 
-`docs/screens/` also has no reference for automations, webhooks, billing, or
-data governance, so those panels were built from the density and tokens of
-`runs-panel.tsx`. That is a gap in the screen library, not a finding against
-the panels.
+The structural work in this revision was verified where the harness allows it:
+the four-tab strip's ARIA wiring and ordering, the two-column card
+composition, the settings sub-navigation, and the breadcrumb are all asserted
+over the real component tree. The billing card's status derivation was moved
+into a pure module (`usage-rows.ts`) specifically so it could be tested without
+a DOM — `renderToStaticMarkup` cannot drive a container whose state comes from
+an async read, and a status bug in "Usage vs. plan limits" would have been
+invisible to any markup assertion. Injecting its worst bug (rendering `0` for a
+resource the server never counted, which would state the workspace has consumed
+nothing) fails two tests.
+
+What remains genuinely unverified is pixel layout: the `lg:grid-cols-2` split
+at narrow widths, whether the tab strip scrolls acceptably on a phone, and
+whether focus rings are visible against every surface they can land on. None of
+that can be asserted without a browser.
 
 **This must be closed by a reviewer with the app running before P06 is
 called done.**

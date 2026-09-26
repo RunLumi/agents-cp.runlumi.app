@@ -22,8 +22,6 @@ import type { DataGovernanceApi } from "./api";
 
 const ORG_ID = "org_0123456789abcdef0123456789abcdef";
 
-const EMPTY_PAGE = { items: [], next_cursor: null, has_more: false };
-
 function pendingApi(): DataGovernanceApi {
   return {
     getPolicy: () => new Promise(() => undefined),
