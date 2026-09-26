@@ -154,6 +154,22 @@ pub enum Permission {
     DataManage,
     DataExport,
     DataDelete,
+    // P07-CG (p07-cg-v1): machine identity and plugin governance.
+    //
+    // These are HUMAN permissions that let an operator manage credentials and
+    // third-party code. They grant nothing to a machine: a machine's authority
+    // is its `ApiKeyScope`, resolved by `machine_identity::authorize_machine`,
+    // and no `MembershipRole` -- including Owner -- confers either of these on
+    // a credential. Keeping them in this enum is what makes the separation
+    // visible at the call site: a route that says `service_accounts.manage` is
+    // unambiguously a human route.
+    //
+    // `plugins.manage` is admin-only because installing code is a supply-chain
+    // decision, not a configuration one.
+    ServiceAccountsRead,
+    ServiceAccountsManage,
+    PluginsRead,
+    PluginsManage,
     Unknown(String),
 }
 
@@ -209,6 +225,10 @@ impl Permission {
             "data.manage" => Self::DataManage,
             "data.export" => Self::DataExport,
             "data.delete" => Self::DataDelete,
+            "service_accounts.read" => Self::ServiceAccountsRead,
+            "service_accounts.manage" => Self::ServiceAccountsManage,
+            "plugins.read" => Self::PluginsRead,
+            "plugins.manage" => Self::PluginsManage,
             _ => Self::Unknown(value.to_owned()),
         }
     }
@@ -264,6 +284,10 @@ impl Permission {
             Self::DataManage => "data.manage",
             Self::DataExport => "data.export",
             Self::DataDelete => "data.delete",
+            Self::ServiceAccountsRead => "service_accounts.read",
+            Self::ServiceAccountsManage => "service_accounts.manage",
+            Self::PluginsRead => "plugins.read",
+            Self::PluginsManage => "plugins.manage",
             Self::Unknown(value) => value,
         }
     }

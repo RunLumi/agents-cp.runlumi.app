@@ -10,6 +10,7 @@ pub mod devices;
 pub mod entitlements;
 pub mod identity;
 pub mod inference;
+pub mod machine_identity;
 pub mod memberships;
 pub mod organizations;
 pub mod outbox;
