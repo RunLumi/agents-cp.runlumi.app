@@ -168,8 +168,8 @@ export function DataPanel({
     setPolicy(policyResult);
     setExports(exportResult);
     setDeletions(deletionResult);
-    setExportCursor(null);
-    setDeletionCursor(null);
+    setExportCursor(exportResult.kind === "ready" ? exportResult.data.next_cursor : null);
+    setDeletionCursor(deletionResult.kind === "ready" ? deletionResult.data.next_cursor : null);
     setRefreshing(false);
   }, [client, orgId]);
 
@@ -251,19 +251,6 @@ export function DataPanel({
     }
   }
 
-  if (
-    policy.kind === "permission" ||
-    exports.kind === "permission" ||
-    deletions.kind === "permission"
-  ) {
-    return (
-      <section aria-label="Data and retention" className="space-y-5">
-        <PanelHeading stale={false} refreshing={refreshing} onRefresh={() => void load()} />
-        <PermissionState resource="the organization's data policy, exports, or deletion workflows" />
-      </section>
-    );
-  }
-
   if (policy.kind === "loading" && exports.kind === "loading" && deletions.kind === "loading") {
     // The tab strip is deliberately NOT short-circuited away here. An early
     // return here would mean a slow policy read blocks the Deletion requests
@@ -301,23 +288,6 @@ export function DataPanel({
       : deletions.kind === "error" && deletions.previous !== null
         ? deletions.previous
         : null;
-
-  // Nothing at all is readable. Show one stated failure rather than three.
-  if (currentPolicy === null && exportPage === null && deletionPage === null) {
-    return (
-      <section aria-label="Data and retention" className="space-y-5">
-        <PanelHeading stale={false} refreshing={refreshing} onRefresh={() => void load()} />
-        <Surface ariaLabel="Data policy">
-          <div className="p-5">
-            <ErrorNotice
-              error={policy.kind === "error" ? policy.error : null}
-              onRetry={() => void load()}
-            />
-          </div>
-        </Surface>
-      </section>
-    );
-  }
 
   return (
     <section aria-label="Data and retention" className="space-y-5">
@@ -383,7 +353,13 @@ export function DataPanel({
 
                 <RetentionSummary policy={currentPolicy} />
               </>
-            ) : null}
+            ) : (
+              <LoadingOrPermission
+                kind={policy.kind}
+                resource="the organization's data policy"
+                loadingLabel="Loading the data policy and retention windows…"
+              />
+            )}
           </div>
         </TabPanel>
       ) : null}
@@ -391,7 +367,13 @@ export function DataPanel({
       {tab === "exports" ? (
         <TabPanel id="exports" label="Data and retention">
           <div className="space-y-5">
-            {exportPage !== null ? (
+            {exportPage === null ? (
+              <LoadingOrPermission
+                kind={exports.kind}
+                resource="organization export history"
+                loadingLabel="Loading organization export history…"
+              />
+            ) : (
               <OrgExportWorkflow
                 orgId={orgId}
                 api={client}
@@ -417,7 +399,7 @@ export function DataPanel({
                   )
                 }
               />
-            ) : null}
+            )}
           </div>
         </TabPanel>
       ) : null}
@@ -425,7 +407,15 @@ export function DataPanel({
       {tab === "controls" ? (
         <TabPanel id="controls" label="Data and retention">
           <div className="space-y-5">
-            {currentPolicy !== null ? <DataControls policy={currentPolicy} /> : null}
+            {currentPolicy !== null ? (
+              <DataControls policy={currentPolicy} />
+            ) : (
+              <LoadingOrPermission
+                kind={policy.kind}
+                resource="the organization's data controls"
+                loadingLabel="Loading platform data controls…"
+              />
+            )}
           </div>
         </TabPanel>
       ) : null}
@@ -433,7 +423,13 @@ export function DataPanel({
       {tab === "deletions" ? (
         <TabPanel id="deletions" label="Data and retention">
           <div className="space-y-5">
-            {deletionPage !== null ? (
+            {deletionPage === null ? (
+              <LoadingOrPermission
+                kind={deletions.kind}
+                resource="organization deletion workflows"
+                loadingLabel="Loading deletion workflows…"
+              />
+            ) : (
               <OrgDeletionWorkflow
                 orgId={orgId}
                 api={client}
@@ -463,7 +459,7 @@ export function DataPanel({
                   ? {}
                   : { onRequestOrganizationDeletion })}
               />
-            ) : null}
+            )}
           </div>
         </TabPanel>
       ) : null}
@@ -534,6 +530,25 @@ function PanelHeading({
   );
 }
 
+function LoadingOrPermission({
+  kind,
+  resource,
+  loadingLabel,
+}: {
+  kind: LoadState<unknown>["kind"];
+  resource: string;
+  loadingLabel: string;
+}) {
+  if (kind === "permission") return <PermissionState resource={resource} />;
+  if (kind !== "loading") return null;
+
+  return (
+    <Surface ariaLabel={resource}>
+      <LoadingRows label={loadingLabel} rows={3} />
+    </Surface>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Account-scoped surface (`/account/data`)
 // ---------------------------------------------------------------------------
@@ -577,7 +592,7 @@ export function PersonalDataPanel({ api, organizations = [] }: PersonalDataPanel
     if (current !== generation.current || active.signal.aborted) return;
     setExports(exportResult);
     setDeletion(deletionResult);
-    setExportCursor(null);
+    setExportCursor(exportResult.kind === "ready" ? exportResult.data.next_cursor : null);
     setRefreshing(false);
   }, [client]);
 

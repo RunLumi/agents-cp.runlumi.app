@@ -129,41 +129,27 @@ neither would have surfaced as a failing test:
   (`LUMI SUBSCRIPTION` / `LICENSE STATE` / `UPSTREAM PROVIDER ACCOUNT`) emerged
   and is used consistently. All three are candidates for `DESIGN.md`.
 
-## Test-harness limitation found while verifying, not assumed
+## Test-harness boundary
 
-While completing a partially-written test I tried to assert that the data
-panel renders its export and deletion job surfaces even when the policy
-read is refused — the `pending_deletion` case, where a tenant must still see
-the deletion it has to finish.
+`renderToStaticMarkup` alone captures the initial state of a component whose
+data arrives asynchronously. A test in
+`apps/web/src/features/data-governance/panel-state.test.tsx` now injects loaded
+hook state to exercise the permission and deletion branches directly, and
+invokes the captured load effect to assert that first-page cursors are saved.
+This adds no DOM dependency and avoids assertions that only match static panel
+headings.
 
-**It cannot be asserted with this repo's web test stack.** `apps/web` has
-vitest with `renderToStaticMarkup` and no DOM, no `act()`, and no
-`@testing-library`. A container with an async read is therefore always
-captured in its initial loading state, so the conditional wiring is not
-reachable from a static render.
+The test still does not simulate browser events, committed rerenders, or
+keyboard interaction. Those remain browser-level coverage gaps; a markup test
+is not evidence of a visual or live-browser pass.
 
-I first wrote a version of that test anyway. It passed — and then it also
-passed with the job surfaces deliberately nested inside the policy guard,
-because the assertions were matching the panel's own static headings rather
-than the workflows. It was a vacuous test.
+## Review follow-up
 
-What is actually pinned now:
-
-- The copy shown when the policy is unreadable, asserted on the exported
-  `POLICY_UNAVAILABLE_REASON`, including that it never reads as though the
-  deletion record were missing.
-- The deletion workflow's own scope disclosure, rendered directly. Removing
-  `<DisclosureList items={disclosures} …>` from `deletion-workflows.tsx` fails
-  both this test and the pre-existing disclosure test, so the property has
-  teeth.
-- The panel's conditional wiring is verified by reading the component:
-  `exportPage` and `deletionPage` are rendered outside the
-  `currentPolicy !== null` guard.
-
-**Closing this properly needs a render-cycle test harness, which means adding
-a DOM test dependency.** That is a deliberate decision for a follow-up, not
-something to slip in at the end of a phase. It is named here rather than
-papered over with a test that cannot fail.
+The follow-up keeps the four tabs available when individual resource reads are
+forbidden. Loading and permission states render inside their own tab, so a
+`pending_deletion` organization can still reach readable deletion-job status.
+Organization export, deletion, and personal export pagination now take their
+initial cursors from the corresponding server page's `next_cursor`.
 
 ## Screen references used
 
