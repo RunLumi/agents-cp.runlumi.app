@@ -119,6 +119,17 @@ try {
   const expect = (label, want, sql) =>
     cases.push({ label, want, statements: Array.isArray(sql) ? sql : [sql] });
 
+  /// A read-shaped assertion: run `setup`, then `sql`, and let `check(row)` pass or
+  /// explain.
+  ///
+  /// Cross-tenant isolation is a property of what a scoped READ returns, not of
+  /// what a write refuses, so it cannot be expressed with `expect`. The rule every
+  /// one of these follows is the same: a query that forgot its `org_id` predicate
+  /// must FAIL, not pass. A cross-tenant test that passes when the tenant filter is
+  /// removed is worse than no test, because it looks like coverage.
+  const query = (label, sql, check, setup = []) =>
+    cases.push({ label, want: "holds", sql, check, statements: setup });
+
   // ------------------------------------------------------------- writers ----
   const account = (sid, name, caps) =>
     `INSERT INTO service_accounts (service_account_id, org_id, name, capabilities_json,
@@ -434,6 +445,114 @@ try {
     pluginInstall(id("pil_", 915), PACKAGE, "9.9.9", "approved"),
   ]);
 
+  // -- cross-tenant isolation ------------------------------------------------
+  //
+  // AGENTS.md requires explicit cross-tenant negative tests for a multi-tenant
+  // feature, and plan07's QA list names this one: "blocked plugin remains on disk
+  // but cannot execute managed capability". The property is that the SAME package
+  // is governed INDEPENDENTLY per organization, so one org's block cannot reach
+  // another's install and one org's install cannot be approved by another's
+  // registration.
+  //
+  // These are `SELECT`-shaped assertions, so they use `query` rather than
+  // `expect`: the subject is what a read returns, not what a write refuses.
+  // Org B's policy blocks NOTHING. The block under test belongs to org A alone, so
+  // a read that returned it for org B would be a leak. (This seed was wrong once,
+  // and the query below caught it — which is the point of having the assertion.)
+  const otherOrgPolicy = `INSERT INTO plugin_policies (org_id, publisher_mode, approved_publishers_json,
+       allowed_packages_json, blocked_packages_json, pinned_versions_json, auto_update, update_mode,
+       version, created_at, updated_at)
+     VALUES ('${ORG_OTHER}', 'any', '[]', '[]', '[]', '{}', 'off', 'managed',
+       1, '${NOW}', '${NOW}')`;
+  const otherOrgInstall = (iid, pkg, version, state, reason) =>
+    `INSERT INTO plugin_installs (install_id, org_id, package_id, version, pending_review_version,
+       review_state, review_reason, version_counter, created_at, updated_at)
+     VALUES ('${iid}', '${ORG_OTHER}', '${pkg}', '${version}', NULL, '${state}',
+       ${reason ?? "NULL"}, 1, '${NOW}', '${NOW}')`;
+  const otherOrgRegistration = (rid, pkg, version, tool) =>
+    `INSERT INTO plugin_tool_registrations (registration_id, org_id, package_id, version, tool_id,
+       approved_by, approved_at, created_at)
+     VALUES ('${rid}', '${ORG_OTHER}', '${pkg}', '${version}', '${tool}', '${PRINCIPAL}', '${NOW}', '${NOW}')`;
+
+  // Seed for every case below: org A has the package blocked in its policy and its
+  // install blocked; org B has the same package installed, approved, unblocked, and
+  // with its own tool registration. Both states coexist, which is the property
+  // under test rather than something a case should have to establish.
+  const otherOrgSetup = [
+    `UPDATE plugin_policies SET blocked_packages_json = '["${PACKAGE}"]' WHERE org_id = '${ORG}'`,
+    `UPDATE plugin_installs SET review_state = 'blocked', blocked_reason = 'untrusted publisher'
+       WHERE org_id = '${ORG}' AND package_id = '${PACKAGE}'`,
+    otherOrgPolicy,
+    otherOrgInstall(id("pil_", 950), PACKAGE, VERSION_ONE, "approved"),
+    otherOrgRegistration(id("ptr_", 950), PACKAGE, VERSION_ONE, "pkg_read"),
+    `INSERT INTO support_grants (grant_id, staff_principal_id, organization_id, reason,
+       ticket_reference, capabilities_json, issued_at, expires_at, version, created_at, updated_at)
+     VALUES ('${id("sgr_", 950)}', '${STAFF}', '${ORG_OTHER}', 'customer asked',
+       'TICKET-950', '["org.lookup"]', '${NOW}', '${FUTURE}', 1, '${NOW}', '${NOW}')`,
+  ];
+
+  expect(
+    "control: the same package is blocked in one org and approved in another",
+    "accepted",
+    otherOrgSetup,
+  );
+  query(
+    "one organization's block does not appear in another organization's policy",
+    `SELECT blocked_packages_json FROM plugin_policies WHERE org_id = '${ORG_OTHER}'`,
+    (row) => {
+      const blocked = JSON.parse(row.blocked_packages_json);
+      // Org B's own policy does not block the package, which is what proves org
+      // A's block did not leak into it. A read that dropped the `org_id`
+      // predicate would return org A's row and fail here.
+      return blocked.includes(PACKAGE) ? "org A's block leaked into org B" : null;
+    },
+    otherOrgSetup,
+  );
+  query(
+    "a blocked install in one org leaves another org's install runnable",
+    `SELECT a.review_state AS a_state, b.review_state AS b_state
+       FROM plugin_installs a, plugin_installs b
+      WHERE a.org_id = '${ORG}' AND a.package_id = '${PACKAGE}'
+        AND b.org_id = '${ORG_OTHER}' AND b.package_id = '${PACKAGE}'`,
+    (row) => {
+      // Org A's install is blocked; org B's is approved. The block moved one row
+      // and not the other, which is the whole property.
+      if (row.a_state !== "blocked") return `org A is ${row.a_state}, expected blocked`;
+      if (row.b_state !== "approved") return `org B is ${row.b_state}, expected approved`;
+      return null;
+    },
+    otherOrgSetup,
+  );
+  // The one review state per package per org: enforced for the OTHER org too, so
+  // the invariant is a property of the index rather than of the seed org.
+  expect("a second install row for one package in ANOTHER org is also refused", "rejected", [
+    ...otherOrgSetup,
+    otherOrgInstall(id("pil_", 951), PACKAGE, VERSION_ONE, "approved"),
+  ]);
+  // A tool registration is an organization's decision about its own use. Org B's
+  // registration must not make org A's tool callable, and vice versa.
+  query(
+    "a tool registration in one org is not visible as the other org's",
+    `SELECT COUNT(*) AS n FROM plugin_tool_registrations
+      WHERE package_id = '${PACKAGE}' AND org_id = '${ORG}'`,
+    (row) =>
+      // Org A registered nothing, so the scoped read returns zero. A read that
+      // forgot `org_id` would return org B's row and fail here.
+      Number(row.n) === 0 ? null : "a registration crossed the organization boundary",
+    otherOrgSetup,
+  );
+  // And the same for a support grant, which is the other cross-tenant surface in
+  // this phase: a grant names one organization and must not be returned for
+  // another.
+  query(
+    "a grant issued for another organization is not returned for this one",
+    `SELECT COUNT(*) AS n FROM support_grants
+      WHERE organization_id = '${ORG}' AND grant_id = '${id("sgr_", 950)}'`,
+    (row) =>
+      Number(row.n) === 0 ? null : "a grant for another organization was returned for this one",
+    otherOrgSetup,
+  );
+
   // -- F25-007 and F13 default deny ------------------------------------------
   expect("registering a tool the manifest does not declare is refused", "rejected", [
     pluginVersion(id("pvr_", 920), PACKAGE, VERSION_ONE, DIGEST, MANIFEST),
@@ -709,8 +828,19 @@ try {
     let actual = "accepted";
     let detail = "";
     try {
-      for (const statement of testCase.statements) {
-        db.prepare(statement).run();
+      if (testCase.check) {
+        // A read-shaped case: run the statements, then judge the row it returns.
+        for (const statement of testCase.statements) {
+          db.prepare(statement).run();
+        }
+        const rows = db.prepare(testCase.sql).all();
+        const problem = rows.map((row) => testCase.check(row)).find(Boolean);
+        actual = problem ? "violated" : "holds";
+        detail = problem ?? "";
+      } else {
+        for (const statement of testCase.statements) {
+          db.prepare(statement).run();
+        }
       }
     } catch (error) {
       actual = "rejected";
@@ -747,7 +877,8 @@ function seed() {
     INSERT INTO users (user_id, email, display_name, email_verified, version, created_at, updated_at)
     VALUES ('${USER}', 'owner@example.com', 'Owner', 1, 1, '${NOW}', '${NOW}');
     INSERT INTO organizations (org_id, display_name, slug, state, version, created_by_user_id, created_at, updated_at)
-    VALUES ('${ORG}', 'Acme', 'acme', 'active', 1, '${USER}', '${NOW}', '${NOW}');
+    VALUES ('${ORG}', 'Acme', 'acme', 'active', 1, '${USER}', '${NOW}', '${NOW}'),
+           ('${ORG_OTHER}', 'Globex', 'globex', 'active', 1, '${USER}', '${NOW}', '${NOW}');
     INSERT INTO service_accounts (service_account_id, org_id, name, capabilities_json,
       created_by_principal, status, version, created_at, updated_at)
     VALUES ('${ACCOUNT}', '${ORG}', 'ci', '["runs.start","runs.read"]', '${PRINCIPAL}', 'active', 1, '${NOW}', '${NOW}');
