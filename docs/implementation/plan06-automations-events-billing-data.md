@@ -266,3 +266,48 @@ review, and each would have shipped as a silent correctness failure:
   scope with no data-class declaration, so they could not be planned.
 - Dispatch failed closed with no seeded `license_states` row, so a new
   tenant could never run a single automation.
+
+### Open contract follow-ups needing a Change Request
+
+Recorded rather than resolved. Each is a limit of `p06-cg-v1` that the phase
+worked around honestly instead of quietly widening the contract. None of them
+blocks the Integration Gate; all three would need `CR-004` or later to change.
+
+1. **No downgrade-preview route.** The frozen route table has
+   `POST /billing/change` but no preview equivalent, so a downgrade cannot be
+   shown to the operator before it is submitted. The panel refuses to submit an
+   unpreviewed downgrade and routes to the provider portal instead, which is
+   honest but is a worse experience than a preview.
+2. **`GET /entitlements` reports no count for an in-limit resource.**
+   `over_limit[]` carries real `current`/`limit`/`over_by`, but only for
+   resources already above their limit. The "Usage vs. plan limits" table
+   therefore shows a dash for every in-limit row and states in its caption that
+   a dash means "not published", never zero. The status column stays sound,
+   because absence from `over_limit` is the server's statement that the resource
+   is within limit.
+3. **The delivery projection has no attempt-level diagnostics.** No frozen route
+   returns webhook or notification attempt rows, so a failed delivery cannot be
+   explained on the surface — only counted.
+
+### Cross-repository follow-ups
+
+- `LumiAgents` `packages/provider/src/lumi-managed-inference.ts` carries P06
+  changes that interleave with roughly 310 lines of uncommitted P05 work on the
+  same file. Splitting the hunks is owed by the P05 owner. Until it lands,
+  `feat/p06-automation-lease` does not compile standalone.
+- `LumiAgents` has **four divergent copies** of the off-peak/automation tool
+  denylist, and `server-operations.ts` is missing `CronUpdate` and `CronDelete`.
+  Verified directly: a model refused `CronCreate` can still see `CronDelete` on
+  the legacy path, which is a real correctness gap, not a cosmetic divergence.
+  Canonical values are already published in `@zcode/shared`. The affected files
+  are outside P06's write surface. Detail in `handoffs/P06-INT-01.md`.
+
+### Frontend verification still owed
+
+No P06 surface has been rendered in a browser; none is attached to this session
+(`browser.tabs.list` returns `[browser.disconnected]`). The structural work is
+asserted over the real component tree and, for the billing status derivation,
+in a pure module precisely because `renderToStaticMarkup` cannot drive a
+container with an async read. What remains unverified is pixel layout at narrow
+widths, tab-strip overflow, and focus-ring contrast. Screen references used,
+and the five deliberate deviations from them, are in `handoffs/P06-FE.md`.

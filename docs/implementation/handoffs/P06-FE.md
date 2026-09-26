@@ -93,9 +93,14 @@ Recorded rather than papered over:
   previewed before submission. The panel refuses to submit and routes to the
   provider portal instead. This is a contract gap and needs a Change Request
   if previews are in scope.
-- `GET /entitlements` publishes **no over-limit counts**, so the usage column
-  reads "Usage not reported here" rather than guessing. A limit with no
-  server-reported count is never shown as zero.
+- `GET /entitlements` reports `over_limit` rows with a real `current`, `limit`,
+  and `over_by` — but **only for resources already above their limit**. There is
+  no count for a resource that is within its limit, so the "Usage vs. plan
+  limits" table shows a dash for those and says in its caption that a dash means
+  "not published", never zero. Absence from `over_limit` *is* the server's
+  statement that the resource is within limit, so the status column is honest
+  even though the figure is not. If per-resource usage for in-limit resources is
+  wanted on this page, that is a contract gap and needs a Change Request.
 - The delivery projection carries **no attempt-level diagnostics**, because no
   frozen route returns attempt rows.
 - `DESIGN.md` has no token for `ambiguous`, no pattern for "these are four
