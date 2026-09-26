@@ -16,6 +16,7 @@ ADRs preserve decisions beyond any one human or agent context window.
 - [0004 Performance budgets](0004-performance-budgets.md)
 - [0005 API contracts and testing](0005-api-contracts-and-testing.md)
 - [0006 Private R2 artifacts for exports](0006-r2-private-export-artifacts.md)
+- [0007 Three actor kinds and three authorization boundaries](0007-three-actor-kinds.md)
 - [Research references](REFERENCES.md)
 
 When a durable decision changes, add a new ADR or explicitly supersede the old one. Do not silently rewrite history.
