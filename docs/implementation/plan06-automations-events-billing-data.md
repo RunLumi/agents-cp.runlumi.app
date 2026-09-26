@@ -328,3 +328,36 @@ in a pure module precisely because `renderToStaticMarkup` cannot drive a
 container with an async read. What remains unverified is pixel layout at narrow
 widths, tab-strip overflow, and focus-ring contrast. Screen references used,
 and the five deliberate deviations from them, are in `handoffs/P06-FE.md`.
+
+### Two gaps found while reconciling the frontend with F22
+
+Both were found by reading `docs/specs/f22-web-control-plane-ux-information-architecture.md`
+against the shipped panels rather than by a failing test, which is itself the
+point: neither would have shown up as a defect.
+
+1. **There is no UI anywhere that can request an organization deletion.**
+   `POST /orgs/{org_id}/deletion` is P02's existing lifecycle route, it requires
+   the `org.lifecycle` permission plus reauthentication plus typed confirmation,
+   and it is the sole organization deletion request. Nothing in `apps/web` calls
+   it. The P06 data panel accepts an `onRequestOrganizationDeletion` seam and no
+   caller ever supplies it, so the panel correctly says "Organization deletion
+   is requested from organization settings. This page only observes the resulting
+   job and can resume it" — and no such control exists on any page.
+
+   This is not a P06 defect: the route, the `org.lifecycle` permission, and the
+   reauthentication primitive are P02's, and F22 places the request in
+   organization settings, not on a data-governance page. It is also the most
+   destructive action in the product, and wiring it from this packet would mean
+   reaching into P02's client and reauth flow to build a control that is easy to
+   get subtly wrong. Recorded for P02/F02 with the route, the permission, and
+   both confirmation requirements named, rather than half-built.
+
+2. **The export and deletion job tables are paginated but not filterable.**
+   F22's FR-F22-004 asks large directories and logs for server pagination,
+   URL-backed filters, sortable supported columns, and search "where
+   meaningful". Both P06 job lists satisfy the first — cursor pagination against
+   `GET /exports` and `GET /deletions` — and none of the rest. These are
+   per-organization admin job lists rather than fleet-wide directories, so
+   "where meaningful" is arguable, but the gap is real and is not currently
+   written down anywhere. Worth a Change Request if filtering job history is
+   wanted, since the cursors are already server-side.

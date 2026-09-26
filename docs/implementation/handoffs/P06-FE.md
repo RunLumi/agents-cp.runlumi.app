@@ -103,6 +103,24 @@ Recorded rather than papered over:
   wanted on this page, that is a contract gap and needs a Change Request.
 - The delivery projection carries **no attempt-level diagnostics**, because no
   frozen route returns attempt rows.
+
+Two further gaps were found while reconciling this work against F22, and
+neither would have surfaced as a failing test:
+
+- **No UI anywhere can request an organization deletion.**
+  `POST /orgs/{org_id}/deletion` requires the `org.lifecycle` permission plus
+  reauthentication plus typed confirmation. Nothing in `apps/web` calls it. This
+  panel accepts an `onRequestOrganizationDeletion` seam that no caller supplies,
+  so it correctly tells the reader the request lives in organization settings —
+  where no such control exists. Not a P06 defect: the route, the permission, and
+  the reauth primitive are P02's, and F22 places the request outside a
+  data-governance page. Recorded for P02/F02 in the plan rather than half-built
+  here, because it is the most destructive action in the product and getting the
+  confirmation flow subtly wrong is worse than not shipping it in this phase.
+- **The export and deletion job tables are paginated but not filterable.**
+  F22's FR-F22-004 also asks for URL-backed filters, sortable columns, and
+  search. Both lists satisfy server pagination and none of the rest. The cursors
+  are already server-side, so this is cheap to add if it is wanted.
 - `DESIGN.md` has no token for `ambiguous`, no pattern for "these are four
   different decision types", and no deadline-presentation rule. Each was
   composed from existing variables rather than invented: a dashed border, a
