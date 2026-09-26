@@ -154,6 +154,23 @@ SET version = ?3,
 WHERE org_id = ?1 AND package_id = ?2 AND version_counter = ?10
 "#;
 
+/// The install's BLOCK STATE, which is where a blocked reason lives.
+///
+/// A separate statement from the policy write because the two rows are different
+/// resources — one is the org's list, the other is this org's installation of
+/// this package — and the caller commits them in one batch. The reason is bound
+/// rather than interpolated, and the 0017 trigger refuses a `blocked` row whose
+/// reason is missing, so a caller that forgets it fails loudly instead of
+/// recording a block nobody can explain.
+const SET_INSTALL_BLOCK_SQL: &str = r#"
+UPDATE plugin_installs
+SET review_state = ?3,
+    blocked_reason = ?4,
+    version_counter = version_counter + 1,
+    updated_at = ?5
+WHERE org_id = ?1 AND package_id = ?2 AND version_counter = ?6
+"#;
+
 const INSERT_REGISTRATION_SQL: &str = r#"
 INSERT INTO plugin_tool_registrations (
     registration_id, org_id, package_id, version, tool_id, approved_by, approved_at, created_at
@@ -696,6 +713,29 @@ ORDER BY package_id ASC
                 input.approved_at.map_or(BindValue::Null, BindValue::Text),
                 BindValue::Text(input.now),
                 BindValue::Int64(input.expected_counter),
+            ],
+        )
+    }
+
+    /// Move an install's review state, recording or clearing a block reason.
+    pub fn set_install_block_statement(
+        &self,
+        org_id: &str,
+        package_id: &str,
+        review_state: PluginReviewState,
+        blocked_reason: Option<&str>,
+        expected_counter: i64,
+        now: &str,
+    ) -> worker::Result<D1PreparedStatement> {
+        self.database.prepare(
+            SET_INSTALL_BLOCK_SQL,
+            &[
+                BindValue::Text(org_id),
+                BindValue::Text(package_id),
+                BindValue::Text(review_state.as_str()),
+                blocked_reason.map_or(BindValue::Null, BindValue::Text),
+                BindValue::Text(now),
+                BindValue::Int64(expected_counter),
             ],
         )
     }

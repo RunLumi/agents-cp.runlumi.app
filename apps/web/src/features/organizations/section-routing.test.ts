@@ -38,6 +38,33 @@ describe("sectionFromPath", () => {
   });
 
   /**
+   * P07-CG §"Web information architecture" adds exactly two Settings sub-pages
+   * and no top-level nav item. The gate is explicit that F22's tree has no place
+   * for either, so these are a recorded deviation rather than a licence to invent
+   * a location; these assertions exist so a later reader cannot "fix" the tree
+   * back by moving them out of Settings.
+   */
+  it("resolves both P07 settings sub-pages without adding a top-level item", () => {
+    expect(sectionFromPath(`/org/${SLUG}/settings/identity`)).toBe("identity");
+    expect(sectionFromPath(`/org/${SLUG}/settings/plugins`)).toBe("plugins");
+    expect(isSettingsSection("identity")).toBe(true);
+    expect(isSettingsSection("plugins")).toBe(true);
+    expect(pathForSection(SLUG, "identity")).toBe(`/org/${SLUG}/settings/identity`);
+    expect(pathForSection(SLUG, "plugins")).toBe(`/org/${SLUG}/settings/plugins`);
+  });
+
+  /**
+   * The reason the machine-identity page is NOT called `Security / Identity`.
+   * In F22 that name means human sign-in and SSO; F06 is frozen and unimplemented,
+   * so a sub-page claiming it would promise a surface that does not exist.
+   */
+  it("does not claim F22's Security / Identity name for the machine-identity page", () => {
+    // `security` remains the account page's segment, unchanged by P07.
+    expect(pathForSection(SLUG, "account")).toBe(`/org/${SLUG}/settings/security`);
+    expect(pathForSection(SLUG, "identity")).not.toContain("security");
+  });
+
+  /**
    * F22's tree, encoded.
    *
    * `docs/specs/f22-web-control-plane-ux-information-architecture.md` puts
@@ -137,6 +164,8 @@ describe("pathForSection", () => {
       "settings",
       "billing",
       "data",
+      "identity",
+      "plugins",
       "account",
     ] as const) {
       const path = pathForSection(SLUG, section);
@@ -167,6 +196,8 @@ describe("isSettingsSection", () => {
     expect(isSettingsSection("billing")).toBe(true);
     expect(isSettingsSection("data")).toBe(true);
     expect(isSettingsSection("webhooks")).toBe(true);
+    expect(isSettingsSection("identity")).toBe(true);
+    expect(isSettingsSection("plugins")).toBe(true);
     expect(isSettingsSection("account")).toBe(true);
     // The group landing is not a sub-page of itself, and top-level sections are
     // not settings at all.

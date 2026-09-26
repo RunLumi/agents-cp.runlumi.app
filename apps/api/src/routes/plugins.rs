@@ -1029,6 +1029,7 @@ pub async fn pin_plugin(
         &package_id,
         &json!({ "version": body.version_to_pin, "reason": body.reason }),
         body.version + 1,
+        None,
     )
     .await
 }
@@ -1315,6 +1316,50 @@ async fn change_policy(
             policy.blocked_packages.retain(|row| row != package_id);
         }
     }
+    // A block records the operator's reason ON THE INSTALL as well as in the
+    // security event. F25's Web UX asks for a visible blocked reason, and
+    // `plugin_installs.blocked_reason` is the frozen contract's place for one —
+    // 0017 has a trigger that refuses a `blocked` review state without it.
+    // Writing it only to the audit row would satisfy the audit requirement and
+    // leave the surface unable to answer the question that requirement exists to
+    // support, which is a gap the frontend found and reported rather than papered
+    // over with an invented value.
+    let install = repository
+        .find_install(org_id, package_id)
+        .await
+        .map_err(|_| store_unavailable(context))?;
+    let install_write = match (&install, action) {
+        (Some(row), "block") => Some(
+            repository
+                .set_install_block_statement(
+                    org_id,
+                    package_id,
+                    PluginReviewState::Blocked,
+                    Some(&body.reason),
+                    row.version_counter,
+                    context.received_at.as_str(),
+                )
+                .map_err(|_| store_unavailable(context))?,
+        ),
+        (Some(row), _) => Some(
+            repository
+                .set_install_block_statement(
+                    org_id,
+                    package_id,
+                    // The prior state was not `blocked` — the 0017 trigger
+                    // refuses a `blocked` row with no reason, so an unblock can
+                    // safely restore the state the install is entitled to.
+                    PluginReviewState::Approved,
+                    None,
+                    row.version_counter,
+                    context.received_at.as_str(),
+                )
+                .map_err(|_| store_unavailable(context))?,
+        ),
+        // Nothing was installed, so there is no review state to change. A
+        // policy block alone already denies new installs and new executions.
+        (None, _) => None,
+    };
     write_policy(
         state,
         context,
@@ -1331,8 +1376,31 @@ async fn change_policy(
         package_id,
         &json!({ "reason": body.reason, "version": body.version }),
         body.version + 1,
+        install_write,
     )
-    .await
+    .await?;
+
+    // Re-read the install so the response carries the reason that was just
+    // recorded. F25's Web UX asks for a visible blocked reason, and returning it
+    // here is what lets the surface show it without inventing one or sending the
+    // operator to the audit log to find out why their own block has no text.
+    let install = repository
+        .find_install(org_id, package_id)
+        .await
+        .map_err(|_| store_unavailable(context))?;
+    let conflicts: Vec<String> = policy_conflicts(&policy)
+        .into_iter()
+        .map(|conflict| conflict.package_id)
+        .collect();
+    Ok(json_response(json!({
+        "policy": policy_json(&policy, body.version + 1, conflicts),
+        "install": install.as_ref().map(|row| json!({
+            "package_id": row.package_id,
+            "version": row.version,
+            "review_state": row.review_state,
+            "blocked_reason": row.blocked_reason,
+        })),
+    })))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1352,6 +1420,11 @@ async fn write_policy(
     package_id: &str,
     metadata: &Value,
     resulting_version: i64,
+    // A second business write that must commit with the policy, or not at all.
+    // The install's block state and the policy's block list are one decision, so
+    // committing them separately would leave a window in which the policy says
+    // blocked and the install does not, or the reverse.
+    extra_write: Option<worker::d1::D1PreparedStatement>,
 ) -> Result<Response<Body>, ApiError> {
     let conflicts: Vec<String> = policy_conflicts(policy)
         .into_iter()
@@ -1415,16 +1488,9 @@ async fn write_policy(
         json!({ "policy": policy_json(policy, resulting_version, conflicts) }),
     )
     .map_err(|_| store_unavailable(context))?;
-    match commit_scoped_mutation(
-        database,
-        context,
-        claim,
-        success,
-        vec![statement, guard],
-        audit,
-    )
-    .await?
-    {
+    let mut writes = vec![statement, guard];
+    writes.extend(extra_write);
+    match commit_scoped_mutation(database, context, claim, success, writes, audit).await? {
         ScopedMutationCommit::Committed => {}
         ScopedMutationCommit::Replayed(replay) => return Ok(replay_response(replay)),
         ScopedMutationCommit::Guarded => return Err(version_conflict(context)),
