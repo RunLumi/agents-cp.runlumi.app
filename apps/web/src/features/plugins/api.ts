@@ -505,7 +505,7 @@ function decodeVersion(value: unknown): PluginVersion | undefined {
   };
 }
 
-function decodeInstall(value: unknown): PluginInstall | undefined {
+export function decodeInstall(value: unknown): PluginInstall | undefined {
   if (
     !isObject(value) ||
     typeof value.install_id !== "string" ||

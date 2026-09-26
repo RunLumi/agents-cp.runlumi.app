@@ -65,8 +65,11 @@ function key(overrides: Partial<ApiKey> = {}): ApiKey {
     service_account_id: account().id,
     organization_id: account().organization_id,
     name: "Release publisher",
-    key_prefix: "lumik_0123456789ab",
-    fingerprint: "sha256:0123456789abcdef",
+    // Twelve and sixteen lowercase hex characters, per the frozen fixture's
+    // `api_key._derivation`. The `lumik_` scheme prefix lives on the wire value
+    // the create response returns once, not on anything stored or re-read.
+    key_prefix: "0f1e2d3c4b5a",
+    fingerprint: "0f1e2d3c4b5a6f70",
     capabilities: ["runs.start"],
     project_ids: [],
     model_aliases: [],
@@ -408,8 +411,8 @@ describe("the API-key surfaces", () => {
       ],
     });
     expect(markup).toContain("Release publisher");
-    expect(markup).toContain("lumik_0123456789ab");
-    expect(markup).toContain("fp sha256:0123456789abcdef");
+    expect(markup).toContain("0f1e2d3c4b5a");
+    expect(markup).toContain("fp 0f1e2d3c4b5a6f70");
     expect(markup).toContain("Active");
     expect(markup).toContain("203.0.113.7");
     expect(markup).toContain("5 active keys per account");

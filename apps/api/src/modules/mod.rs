@@ -30,3 +30,5 @@ pub mod usage;
 
 #[cfg(test)]
 mod p04_domain_tests;
+#[cfg(test)]
+mod p07_fixture_tests;

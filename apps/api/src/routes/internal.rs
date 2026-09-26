@@ -1118,3 +1118,376 @@ fn store_unavailable(context: &RequestContext) -> ApiError {
 fn json_response(body: Value) -> Response<Body> {
     (StatusCode::OK, Json(body)).into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    use crate::repositories::{FeatureFlagRecord, KillSwitchRecord, SupportGrantRecord};
+
+    const FIXTURE: &str =
+        include_str!("../../../../docs/implementation/fixtures/p07-contracts-v1.json");
+
+    fn context() -> RequestContext {
+        RequestContext::new(
+            "req_0123456789abcdef0123456789abcdef".parse().unwrap(),
+            crate::core::CorrelationId::new("trace-p07").unwrap(),
+            "2026-09-26T12:00:00.000Z".parse().unwrap(),
+        )
+    }
+
+    fn fixture() -> Value {
+        serde_json::from_str(FIXTURE).expect("the frozen fixture is valid JSON")
+    }
+
+    fn keys(value: &Value) -> BTreeSet<String> {
+        value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    fn reason_of(error: &ApiError) -> String {
+        error.error.details["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    /// There is no web client for `/internal/*` — the gate's decision 4 puts the
+    /// staff console out of P07's scope — so nothing else pins these three
+    /// projections. They are the platform's own record of what a staff principal
+    /// did and why, and they are the surface an incident review reads.
+    #[test]
+    fn the_flag_projection_is_the_frozen_field_set() {
+        let frozen = &fixture()["feature_flag_with_a_percentage"];
+        let record = FeatureFlagRecord {
+            flag_key: frozen["flag_key"].as_str().expect("key").to_owned(),
+            enabled: 1,
+            rollout_percentage: frozen["rollout_percentage"].as_i64().expect("number"),
+            org_allowlist_json: r#"[]"#.to_owned(),
+            cohort: frozen["cohort"].as_str().expect("cohort").to_owned(),
+            expires_at: frozen["expires_at"].as_str().expect("expiry").to_owned(),
+            owner_staff_principal_id: frozen["owner_staff_principal_id"]
+                .as_str()
+                .expect("owner")
+                .to_owned(),
+            updated_by: frozen["updated_by"]
+                .as_str()
+                .expect("updated_by")
+                .to_owned(),
+            version: frozen["version"].as_i64().expect("version"),
+            created_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            updated_at: "2026-09-26T12:00:00.000Z".to_owned(),
+        };
+        let projection = flag_json(&record);
+        // The expiry travels with the flag, because an expired flag resolves OFF
+        // and an operator who cannot see why will re-enable it.
+        assert_eq!(projection["expires_at"], frozen["expires_at"]);
+        // SQLite has no boolean; the wire does, because a client that has to
+        // remember that 0 means false will get it wrong on the row that matters.
+        assert_eq!(projection["enabled"], true);
+        let mut expected: BTreeSet<String> = keys(frozen)
+            .into_iter()
+            .filter(|key| !key.starts_with('_'))
+            .collect();
+        expected.insert("created_at".to_owned());
+        expected.insert("updated_at".to_owned());
+        assert_eq!(keys(&projection), expected);
+    }
+
+    #[test]
+    fn the_kill_switch_projection_carries_both_engagement_and_lifting() {
+        // A switch that cannot be read as lifted is a switch nobody trusts to
+        // have been lifted, so `lifted_at`, `lifted_by`, and `lift_reason` are as
+        // load-bearing as `engaged_at` and the reason.
+        let record = KillSwitchRecord {
+            kill_switch_id: "ksw_0123456789abcdef0123456789abcdef".to_owned(),
+            target_class: "plugin_version".to_owned(),
+            target_ref: "pkg_0123456789abcdef0123456789abcdef@1.0.0".to_owned(),
+            scope: "organization".to_owned(),
+            organization_id: Some("org_0123456789abcdef0123456789abcdef".to_owned()),
+            reason: "CVE-2026-0001 in 1.0.0".to_owned(),
+            engaged_by_staff_principal_id: "stf_0123456789abcdef0123456789abcdef".to_owned(),
+            engaged_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            expires_at: None,
+            state: "lifted".to_owned(),
+            lifted_at: Some("2026-09-26T14:00:00.000Z".to_owned()),
+            lifted_by: Some("stf_0123456789abcdef0123456789abcdef".to_owned()),
+            lift_reason: Some("upstream fix released".to_owned()),
+            version: 2,
+            created_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            updated_at: "2026-09-26T14:00:00.000Z".to_owned(),
+        };
+        let projection = kill_switch_json(&record);
+        for field in [
+            "kill_switch_id",
+            "target_class",
+            "target_ref",
+            "scope",
+            "organization_id",
+            "reason",
+            "engaged_by_staff_principal_id",
+            "engaged_at",
+            "expires_at",
+            "state",
+            "lifted_at",
+            "lifted_by",
+            "lift_reason",
+            "version",
+        ] {
+            assert!(
+                projection.as_object().expect("object").contains_key(field),
+                "{field} is part of the platform's own record"
+            );
+        }
+        assert_eq!(projection["lift_reason"], "upstream fix released");
+        // A global switch carries no organization, and the null is load-bearing:
+        // it is how a caller tells a global row from an organization row. The
+        // FIELD is present either way, so the shape does not change with scope.
+        assert!(keys(&projection).contains("organization_id"));
+        let mut global = record;
+        global.scope = "global".to_owned();
+        global.organization_id = None;
+        assert!(kill_switch_json(&global)["organization_id"].is_null());
+    }
+
+    #[test]
+    fn the_grant_projection_is_the_frozen_field_set() {
+        for key in ["support_grant_expired", "support_grant_revoked"] {
+            let frozen = &fixture()[key];
+            let record = SupportGrantRecord {
+                grant_id: frozen["grant_id"].as_str().expect("id").to_owned(),
+                staff_principal_id: frozen["staff_principal_id"]
+                    .as_str()
+                    .expect("staff")
+                    .to_owned(),
+                organization_id: frozen["organization_id"].as_str().expect("org").to_owned(),
+                reason: frozen["reason"].as_str().expect("reason").to_owned(),
+                ticket_reference: frozen["ticket_reference"]
+                    .as_str()
+                    .expect("ticket")
+                    .to_owned(),
+                capabilities_json: serde_json::to_string(&frozen["capabilities_json"])
+                    .expect("json"),
+                issued_at: frozen["issued_at"].as_str().expect("issued").to_owned(),
+                expires_at: frozen["expires_at"].as_str().expect("expires").to_owned(),
+                revoked_at: frozen["revoked_at"].as_str().map(str::to_owned),
+                revoke_reason: frozen["revoke_reason"].as_str().map(str::to_owned),
+                version: frozen["version"].as_i64().expect("version"),
+                created_at: "2026-09-26T09:00:00.000Z".to_owned(),
+                updated_at: "2026-09-26T09:00:00.000Z".to_owned(),
+            };
+            let projection = grant_json(&record);
+            // `issued_at` IS the grant's creation time, so there is no separate
+            // `created_at` to project. The wire field is `capabilities`, not the
+            // stored column name `capabilities_json`: a client should not have to
+            // know the column name.
+            let expected: BTreeSet<String> = keys(frozen)
+                .into_iter()
+                .filter(|key| !key.starts_with('_') && key != "capabilities_json")
+                .chain(std::iter::once("capabilities".to_owned()))
+                .collect();
+            assert_eq!(keys(&projection), expected, "{key}");
+            assert_eq!(projection["capabilities"], frozen["capabilities_json"]);
+            // A grant is not a credential and carries none: no token, no secret,
+            // nothing that could be replayed against a customer.
+            for absent in ["token", "secret", "access_token", "api_key"] {
+                assert!(
+                    !projection.as_object().expect("object").contains_key(absent),
+                    "a support grant must not carry {absent}"
+                );
+            }
+        }
+    }
+
+    /// A support grant is scoped to NAMED permissions. A wildcard would make the
+    /// grant a standing superuser pass, which is the one thing F24-003's "default
+    /// mode is metadata, not impersonation" exists to prevent.
+    #[test]
+    fn a_support_grant_cannot_be_a_wildcard_or_an_empty_set() {
+        let context = context();
+        let error =
+            parse_capabilities(&["*".to_owned()], &context).expect_err("a wildcard is refused");
+        // Refused as a PERMISSION decision, not as malformed input, so a client
+        // can tell "you may not hold that" from "you sent that wrong".
+        assert_eq!(error.error.code, ApiErrorCode::PermissionDenied);
+        assert!(
+            parse_capabilities(&[], &context).is_err(),
+            "a grant with no capability grants nothing and should not exist"
+        );
+        assert!(
+            parse_capabilities(&vec!["org.lookup".to_owned(); 33], &context).is_err(),
+            "a grant is bounded"
+        );
+        assert!(
+            parse_capabilities(&["org.not_a_permission".to_owned()], &context).is_err(),
+            "an unknown permission is not grantable"
+        );
+        assert_eq!(
+            parse_capabilities(&["org.lookup".to_owned()], &context)
+                .expect("a known permission")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_allowlist_entry_must_be_an_organization_and_never_a_wildcard() {
+        let context = context();
+        // An absent allowlist and an empty one mean the same thing for a flag, and
+        // both are stored as `[]`, so the two forms are not distinguishable later.
+        assert_eq!(allowlist_json(None, &context).expect("absent"), "[]");
+        assert_eq!(allowlist_json(Some(&[]), &context).expect("empty"), "[]");
+        for bad in ["*", "org_*", "org_short", "not-an-org-id", ""] {
+            assert!(
+                allowlist_json(Some(&[bad.to_owned()]), &context).is_err(),
+                "{bad:?} is not an organization"
+            );
+        }
+        // Sorted and deduplicated, so a re-PATCH with the same set is a no-op
+        // rather than a new version and a new audit entry.
+        assert_eq!(
+            allowlist_json(
+                Some(&[
+                    "org_ffffffffffffffffffffffffffffffff".to_owned(),
+                    "org_0123456789abcdef0123456789abcdef".to_owned(),
+                    "org_0123456789abcdef0123456789abcdef".to_owned(),
+                ]),
+                &context
+            )
+            .expect("valid ids"),
+            r#"["org_0123456789abcdef0123456789abcdef","org_ffffffffffffffffffffffffffffffff"]"#
+        );
+    }
+
+    /// Expiry, revocation, and organization mismatch are three different
+    /// conversations with the person holding the grant, so three codes. A client
+    /// that treats them as one cannot tell an operator to ask for a new grant
+    /// versus to stop asking.
+    #[test]
+    fn the_staff_error_statuses_and_codes_stay_distinct() {
+        let context = context();
+        let expected = [
+            (
+                StaffDenyReason::AuthenticationRequired,
+                ApiErrorCode::AuthenticationRequired,
+            ),
+            (
+                StaffDenyReason::PermissionDenied,
+                ApiErrorCode::PermissionDenied,
+            ),
+            (
+                StaffDenyReason::StaffPrincipalSuspended,
+                ApiErrorCode::PermissionDenied,
+            ),
+            (
+                StaffDenyReason::SupportGrantRequired,
+                ApiErrorCode::PermissionDenied,
+            ),
+            (
+                StaffDenyReason::SupportGrantExpired,
+                ApiErrorCode::ValidationFailed,
+            ),
+            (
+                StaffDenyReason::SupportGrantRevoked,
+                ApiErrorCode::ValidationFailed,
+            ),
+            (
+                StaffDenyReason::SupportGrantOrganizationMismatch,
+                ApiErrorCode::ValidationFailed,
+            ),
+            (
+                StaffDenyReason::SupportGrantReasonRequired,
+                ApiErrorCode::ValidationFailed,
+            ),
+            (
+                StaffDenyReason::SupportGrantTtlInvalid,
+                ApiErrorCode::ValidationFailed,
+            ),
+        ];
+        let mut codes: BTreeSet<String> = BTreeSet::new();
+        for (reason, status) in expected {
+            let error = staff_error(&context, reason);
+            assert_eq!(error.error.code, status, "{}", reason.code());
+            let code = reason_of(&error);
+            assert!(!code.is_empty(), "{reason:?} must carry a code");
+            assert!(
+                codes.insert(code),
+                "{reason:?} reuses another reason's code"
+            );
+        }
+        assert_eq!(codes.len(), expected.len());
+    }
+
+    #[test]
+    fn a_flag_and_a_kill_switch_refusal_each_carry_their_own_code() {
+        let context = context();
+        for error in [
+            FlagError::ExpiryRequired,
+            FlagError::InvalidFlagKey,
+            FlagError::InvalidPercentage,
+        ] {
+            let mapped = flag_error(&context, error);
+            assert_eq!(mapped.error.code, ApiErrorCode::ValidationFailed);
+            assert_eq!(reason_of(&mapped), error.code());
+        }
+        for error in [
+            KillSwitchError::TargetUnknown,
+            KillSwitchError::TooBroad,
+            KillSwitchError::ReasonRequired,
+            KillSwitchError::ScopeOrganizationMismatch,
+            KillSwitchError::InvalidExpiry,
+        ] {
+            let mapped = kill_switch_error(&context, error);
+            assert_eq!(mapped.error.code, ApiErrorCode::ValidationFailed);
+            assert_eq!(reason_of(&mapped), error.code());
+        }
+        // The two namespaces must not overlap, so a client branching on the code
+        // cannot read a kill-switch refusal as a flag refusal.
+        for flag in [
+            FlagError::ExpiryRequired,
+            FlagError::InvalidFlagKey,
+            FlagError::InvalidPercentage,
+        ] {
+            for switch in [
+                KillSwitchError::TargetUnknown,
+                KillSwitchError::TooBroad,
+                KillSwitchError::ReasonRequired,
+            ] {
+                assert_ne!(flag.code(), switch.code());
+            }
+        }
+    }
+
+    #[test]
+    fn a_cursor_it_cannot_attribute_is_refused_rather_than_ignored() {
+        let context = context();
+        assert_eq!(decode_cursor(None, &context).expect("absent"), (None, None));
+        assert_eq!(
+            decode_cursor(Some(""), &context).expect("empty"),
+            (None, None)
+        );
+        assert_eq!(
+            decode_cursor(Some("2026-09-26T12:00:00.000Z|abc"), &context).expect("a pair"),
+            (
+                Some("2026-09-26T12:00:00.000Z".to_owned()),
+                Some("abc".to_owned())
+            )
+        );
+        for bad in [
+            "one-part",
+            "a|b|c",
+            &format!("{}|{}", "x".repeat(41), "abc"),
+        ] {
+            assert!(
+                decode_cursor(Some(bad), &context).is_err(),
+                "{bad} is not a cursor this service issued"
+            );
+        }
+    }
+}

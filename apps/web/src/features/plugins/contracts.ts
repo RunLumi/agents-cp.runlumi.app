@@ -200,15 +200,64 @@ export function reviewStateDetail(install: PluginListItem["install"]): string {
  * because they have different remediations: an expansion needs a human decision,
  * and a policy conflict needs the policy fixed.
  */
+/**
+ * Why an install is waiting, in the reviewer's terms.
+ *
+ * The server stores `"<event id> <summary json>"` — the event id followed by
+ * `{"expands":true,"classes":[{"class":"tools","verdict":"added"},…]}`. The event
+ * id is the stable code that makes the refusal auditable; the payload is what
+ * says WHICH class grew.
+ *
+ * Both halves are read here, and that is the point. An earlier version compared
+ * the whole stored string to the bare event id, which the server never writes, so
+ * every real expansion fell through to the generic branch and rendered as
+ * `Recorded reason: plugin.permission_expansion_detected.v1 {"expands":true,…}` —
+ * a raw code and a JSON blob at the one moment a reviewer most needs a sentence.
+ * The prefix match is what makes the frozen reason format a contract rather than
+ * an accident, and a payload that does not parse degrades to a sentence rather
+ * than to a crash or to a leaked blob.
+ */
 export function pendingReviewReason(install: PluginListItem["install"]): string {
   if (!install || install.review_state !== "pending_review") return "";
-  if (install.review_reason === PERMISSION_EXPANSION_REASON) {
+  const reason = install.review_reason;
+  if (reason === null || reason === "") {
+    return "No reason was recorded with this pending review. Review the permission diff and the organization policy before approving.";
+  }
+  if (!reason.startsWith(PERMISSION_EXPANSION_REASON)) {
+    return `Recorded reason: ${reason}`;
+  }
+  const grew = growingClassesFromReason(reason);
+  if (grew.length === 0) {
     return "The candidate version widens the plugin's declared capability, so managed mode refused to install it. Read the permission diff, then approve it deliberately if the gain is intended.";
   }
-  if (install.review_reason) {
-    return `Recorded reason: ${install.review_reason}`;
+  const names = grew.map(permissionClassLabel).join(", ");
+  return `Managed mode refused this version because it widens the plugin's declared capability in ${grew.length} ${grew.length === 1 ? "class" : "classes"}: ${names}. It is not installed, and nothing about it runs until you approve it deliberately.`;
+}
+
+/** The growing class names carried in a stored expansion reason, if any. */
+function growingClassesFromReason(reason: string): string[] {
+  const payload = reason.slice(PERMISSION_EXPANSION_REASON.length).trim();
+  if (payload.length === 0) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    // A reason this surface cannot parse is still a reason, and the sentence
+    // above is true of it. Showing the operator the unparsed text is not.
+    return [];
   }
-  return "No reason was recorded with this pending review. Review the permission diff and the organization policy before approving.";
+  if (typeof parsed !== "object" || parsed === null) return [];
+  const classes = (parsed as { classes?: unknown }).classes;
+  if (!Array.isArray(classes)) return [];
+  const names: string[] = [];
+  for (const entry of classes) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { class: className, verdict } = entry as { class?: unknown; verdict?: unknown };
+    if (verdict === "added" && typeof className === "string" && !names.includes(className)) {
+      names.push(className);
+    }
+  }
+  return names;
 }
 
 export function isPendingReview(install: PluginListItem["install"]): boolean {

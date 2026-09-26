@@ -327,6 +327,66 @@ describe("review state", () => {
     expect(pendingReviewReason(null)).toBe("");
     expect(pendingReviewReason(listItem().install)).toBe("");
   });
+
+  it("reads the event id AND the payload, which is what the server actually stores", () => {
+    // The stored reason is `"<event id> <summary json>"`, never the bare id. An
+    // equality check on the id therefore misses every real refusal, so the two
+    // halves are matched separately and the growing classes are named.
+    const withPayload = listItem({
+      install: {
+        version: "2.0.0",
+        review_state: "pending_review",
+        pending_review_version: "2.1.0",
+        review_reason:
+          'plugin.permission_expansion_detected.v1 {"expands":true,"classes":[{"class":"tools","verdict":"added"},{"class":"network_destinations","verdict":"removed"}]}',
+        blocked_reason: null,
+      },
+    });
+    const reason = pendingReviewReason(withPayload.install);
+    expect(reason).toContain("Tools");
+    expect(reason).toContain("1 class");
+    // A class that shrank is not part of the gain, and the raw stored string is
+    // not shown to an operator.
+    expect(reason).not.toContain("Network destinations");
+    expect(reason).not.toContain("plugin.permission_expansion_detected");
+  });
+
+  it("degrades to a sentence when the payload is absent or unparseable", () => {
+    for (const review_reason of [
+      "plugin.permission_expansion_detected.v1",
+      "plugin.permission_expansion_detected.v1 {not json",
+      "plugin.permission_expansion_detected.v1 {}",
+      "plugin.permission_expansion_detected.v1 []",
+    ]) {
+      const state = listItem({
+        install: {
+          version: "2.0.0",
+          review_state: "pending_review",
+          pending_review_version: "2.1.0",
+          review_reason,
+          blocked_reason: null,
+        },
+      });
+      const reason = pendingReviewReason(state.install);
+      expect(reason).toContain("Read the permission diff");
+      expect(reason).not.toContain("{");
+    }
+  });
+
+  it("keeps an unrelated recorded reason verbatim rather than guessing at it", () => {
+    // A reason this surface does not recognize is shown as recorded. Rewriting it
+    // into an expansion explanation would state something the server did not say.
+    const other = listItem({
+      install: {
+        version: "2.0.0",
+        review_state: "pending_review",
+        pending_review_version: "2.1.0",
+        review_reason: "operator.requested_upgrade",
+        blocked_reason: null,
+      },
+    });
+    expect(pendingReviewReason(other.install)).toContain("operator.requested_upgrade");
+  });
 });
 
 describe("policy conflicts", () => {

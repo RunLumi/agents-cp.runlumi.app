@@ -197,27 +197,49 @@ impl PluginPermissionManifest {
     /// host literal, not on a resolved address, so a hostname that later resolves
     /// inward is still a declaration the operator can see.
     pub fn rejects_destination(destination: &str) -> bool {
-        let Some((scheme, rest)) = destination.split_once("://") else {
-            return true;
+        // Two accepted forms, and BOTH have to be handled here. A wildcard
+        // pattern carries no scheme, so splitting on `://` first would classify
+        // every `*.example.com` declaration as a syntax error and refuse the
+        // whole report — which is what this did before it was fixed, and it made
+        // the documented wildcard form unusable.
+        let host = match destination.strip_prefix("*.") {
+            // A strict-subdomain pattern. The suffix is the host to evaluate: a
+            // pattern rooted at a private or loopback name reaches inward the
+            // same way an exact literal does.
+            Some(suffix) => suffix,
+            None => {
+                let Some((scheme, rest)) = destination.split_once("://") else {
+                    return true;
+                };
+                if !matches!(scheme, "http" | "https" | "ws" | "wss") {
+                    return true;
+                }
+                let authority = rest.split('/').next().unwrap_or_default();
+                // Strip the port, keeping IPv6 brackets intact.
+                match authority.rsplit_once(':') {
+                    Some((before, port))
+                        if !before.is_empty() && port.chars().all(|c| c.is_ascii_digit()) =>
+                    {
+                        before
+                    }
+                    _ => authority,
+                }
+            }
         };
-        if !matches!(scheme, "http" | "https" | "ws" | "wss") {
+        // `*` alone, or `*.` with no host, is a pattern with no host in it. There
+        // is nothing to bound, so it is refused rather than treated as public.
+        if host.is_empty() || host.contains('*') {
             return true;
         }
-        let authority = rest.split('/').next().unwrap_or_default();
-        // Strip the port, keeping IPv6 brackets intact.
-        let host = match authority.rsplit_once(':') {
-            Some((before, port))
-                if !before.is_empty() && port.chars().all(|c| c.is_ascii_digit()) =>
-            {
-                before
-            }
-            _ => authority,
-        };
         let host = host
             .trim_start_matches('[')
             .trim_end_matches(']')
             .to_ascii_lowercase();
-        if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+        if host == "local"
+            || host == "localhost"
+            || host.ends_with(".localhost")
+            || host.ends_with(".local")
+        {
             return true;
         }
         if let Ok(address) = host.parse::<std::net::Ipv4Addr>() {
@@ -1008,6 +1030,52 @@ mod tests {
     }
 
     // -- network destination refusal ---------------------------------------
+
+    /// The documented wildcard form is a DESTINATION, not a syntax error.
+    ///
+    /// This is the case that was wrong. `rejects_destination` split on `://`
+    /// first, and a `*.suffix` pattern has no scheme, so every wildcard
+    /// declaration was classified as unparseable and the whole plugin report was
+    /// refused — which made a form the field's own documentation promises
+    /// unusable. The suffix is now the host that gets evaluated.
+    #[test]
+    fn a_subdomain_pattern_is_evaluated_by_its_suffix() {
+        for pattern in ["*.example.com", "*.cdn.example.com", "*.co.uk"] {
+            assert!(
+                !PluginPermissionManifest::rejects_destination(pattern),
+                "{pattern} is a documented destination form"
+            );
+        }
+        // A pattern rooted at a private, loopback or link-local name reaches
+        // inward exactly the way an exact literal does, so it is refused too.
+        // `*.local` needs the bare `local` case in the check above, because
+        // stripping the wildcard leaves exactly that, with no dot in front of it
+        // for a suffix test to find.
+        //
+        // A suffix that is a THREE-octet string (`*.0.0.1`) is deliberately not in
+        // this list: it is not an IP literal, so it is a hostname like any other
+        // and the literal-based check cannot call it private. Asserted below rather
+        // than left for a reader to infer.
+        for pattern in [
+            "*.localhost",
+            "*.local",
+            "*.internal.local",
+            "*.127.0.0.1",
+            "*.10.0.0.5",
+            "*.169.254.169.254",
+            "*",   // no host at all
+            "*.",  // no host after the dot
+            "*.*", // two wildcards is not a pattern this platform bounds
+        ] {
+            assert!(
+                PluginPermissionManifest::rejects_destination(pattern),
+                "{pattern} is not a destination this platform will record"
+            );
+        }
+        // The literal-based limitation, asserted: a three-octet suffix is a
+        // hostname, and the check has no basis to call it private.
+        assert!(!PluginPermissionManifest::rejects_destination("*.0.0.1"));
+    }
 
     #[test]
     fn private_loopback_and_link_local_destinations_are_refused() {

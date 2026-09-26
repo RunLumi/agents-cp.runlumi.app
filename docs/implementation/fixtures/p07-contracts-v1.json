@@ -1,0 +1,411 @@
+{
+  "contract_version": "p07-cg-v1",
+  "_note": "Frozen before implementation, per P07-CG \u00a7Fixtures. Every value here is consumed by a test; none of it is illustrative. The shapes are the WIRE shapes the Rust projections serialize and the TypeScript decoders read \u2014 an object where the wire carries an array would leave the browser unable to read its own contract \u2014 so a change on either side fails a test rather than a reader. Consumed by `apps/api/src/modules/p07_fixture_tests.rs`, `apps/web/src/features/identity/fixture-contract.test.ts`, and `apps/web/src/features/plugins/fixture-contract.test.ts`.",
+  "service_account": {
+    "id": "svc_0123456789abcdef0123456789abcdef",
+    "organization_id": "org_0123456789abcdef0123456789abcdef",
+    "name": "ci-deploy",
+    "description": "Deploys releases from CI.",
+    "capabilities": [
+      "runs.start",
+      "runs.read",
+      "agents.read"
+    ],
+    "status": "active",
+    "expires_at": null,
+    "suspended_at": null,
+    "suspend_reason": null,
+    "created_by_principal_id": "usr_0123456789abcdef0123456789abcdef",
+    "version": 1,
+    "created_at": "2026-09-26T12:00:00.000Z",
+    "updated_at": "2026-09-26T12:00:00.000Z"
+  },
+  "service_account_with_a_human_only_capability": {
+    "_expected": "capability_human_only",
+    "_refused": "org.lifecycle",
+    "_note": "FR-F14-007 plus the gate's five human-only permissions. The account shape is identical apart from the refused capability, so a test that only compared the two shapes would not notice the refusal; the stable code is the thing under test."
+  },
+  "api_key": {
+    "id": "key_0123456789abcdef0123456789abcdef",
+    "service_account_id": "svc_0123456789abcdef0123456789abcdef",
+    "organization_id": "org_0123456789abcdef0123456789abcdef",
+    "name": "ci-deploy",
+    "key_prefix": "0f1e2d3c4b5a",
+    "fingerprint": "0f1e2d3c4b5a6f70",
+    "capabilities": [
+      "runs.start",
+      "runs.read"
+    ],
+    "project_ids": [
+      "prj_0123456789abcdef0123456789abcdef"
+    ],
+    "model_aliases": [
+      "coding-default"
+    ],
+    "network_allowlist": [
+      "*.ci.trusted.example"
+    ],
+    "status": "active",
+    "rotated_from_key_id": null,
+    "rotated_to_key_id": null,
+    "last_used_at": "2026-09-26T13:00:00.000Z",
+    "last_used_source": "ip:203.0.113.10",
+    "expires_at": null,
+    "revoked_at": null,
+    "revoke_reason": null,
+    "version": 1,
+    "created_at": "2026-09-26T12:00:00.000Z",
+    "updated_at": "2026-09-26T12:00:00.000Z",
+    "_derivation": {
+      "wire_shape": "lumik_<12 lowercase hex>_<43 base64url>",
+      "prefix_from": "the first six bytes of the 32 CSPRNG bytes, lowercase hex",
+      "secret_hash_from": "SHA-256 of the SECRET half only, lowercase hex, 64 characters",
+      "fingerprint_from": "the first 16 hex characters of SHA-256 of the WHOLE wire value",
+      "_note": "The prefix is derived from the same entropy as the secret, so a fixture cannot carry a prefix that no key would ever produce. The two hashes deliberately cover different inputs: one answers 'is this the right secret', the other answers 'which key was this'."
+    }
+  },
+  "api_key_rotation": {
+    "_note": "F14-004. The replacement exists BEFORE the prior key is marked rotated, and both writes are in one batch, so there is no instant in which the organization has no working key.",
+    "replacement": {
+      "rotated_from_key_id": "key_0123456789abcdef0123456789abcdef",
+      "same_scope_as": "api_key"
+    },
+    "prior_key_after": {
+      "status": "rotated",
+      "revoke_reason": "rotated to a new key"
+    }
+  },
+  "permission_diff_expands": {
+    "_note": "A version that adds a tool and a secret handle while REMOVING two network destinations. The class verdicts differ, and `expands` is true because growth in any class is growth. A reviewer who reads 'networking was reduced' must not be able to reach the conclusion before seeing the tool. `before` and `after` are the frozen manifests, deliberately written UNSORTED in `before.network_destinations` and `before.secret_handles`: the diff normalizes both sides to sorted sets, so an ordering change between two versions of the same declaration is not a capability change, and every `added`/`removed` list below is in that normalized order. A fixture that listed them pre-normalized would let a broken normalizer pass. `classes` is an ARRAY in emission order, because a diff reads as a widening of authority from left to right and the order is part of what the reviewer reads.",
+    "from_version": "1.0.0",
+    "to_version": "1.1.0",
+    "expands": true,
+    "before": {
+      "tools": [
+        "pkg_read"
+      ],
+      "mcp_servers": [],
+      "network_destinations": [
+        "https://telemetry.example.com",
+        "https://crash.example.com"
+      ],
+      "filesystem_scopes": [],
+      "process_spawn": false,
+      "secret_handles": [
+        {
+          "handle": "gh",
+          "declared_purpose": "admin-org"
+        }
+      ],
+      "browser_capability": "none",
+      "external_data_handling": "none"
+    },
+    "after": {
+      "tools": [
+        "pkg_read",
+        "pkg_write"
+      ],
+      "mcp_servers": [],
+      "network_destinations": [],
+      "filesystem_scopes": [],
+      "process_spawn": false,
+      "secret_handles": [],
+      "browser_capability": "none",
+      "external_data_handling": "none"
+    },
+    "classes": [
+      {
+        "class": "tools",
+        "verdict": "added",
+        "added": [
+          "pkg_write"
+        ],
+        "removed": []
+      },
+      {
+        "class": "mcp_servers",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      },
+      {
+        "class": "network_destinations",
+        "verdict": "removed",
+        "added": [],
+        "removed": [
+          "https://crash.example.com",
+          "https://telemetry.example.com"
+        ]
+      },
+      {
+        "class": "filesystem_scopes",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      },
+      {
+        "class": "secret_handles",
+        "verdict": "removed",
+        "added": [],
+        "removed": [
+          "gh::admin-org"
+        ]
+      },
+      {
+        "class": "process_spawn",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      },
+      {
+        "class": "browser_capability",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      },
+      {
+        "class": "external_data_handling",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      }
+    ]
+  },
+  "permission_diff_contraction": {
+    "_note": "A contraction in EVERY class it touches, on its own version pair rather than the reverse of the expanding one: 2.0.0 -> 2.1.0 of a different package, dropping a tool, a network destination and BOTH secret handles. Not an expansion, so managed mode installs it without renewed review (F25-004). Asserting a contraction by running the expansion backwards would pass whether or not the diff were direction-sensitive, so the two fixtures are deliberately not the same pair: what they share is the rule that a class with entries on both sides is reported `added`.",
+    "from_version": "2.0.0",
+    "to_version": "2.1.0",
+    "expands": false,
+    "before": {
+      "tools": [
+        "pkg_read",
+        "pkg_write"
+      ],
+      "mcp_servers": [],
+      "network_destinations": [
+        "https://telemetry.example.com",
+        "https://api.example.com"
+      ],
+      "filesystem_scopes": [],
+      "process_spawn": false,
+      "secret_handles": [
+        {
+          "handle": "gh",
+          "declared_purpose": "admin-org"
+        },
+        {
+          "handle": "aws",
+          "declared_purpose": "read-logs"
+        }
+      ],
+      "browser_capability": "none",
+      "external_data_handling": "none"
+    },
+    "after": {
+      "tools": [
+        "pkg_read"
+      ],
+      "mcp_servers": [],
+      "network_destinations": [
+        "https://api.example.com"
+      ],
+      "filesystem_scopes": [],
+      "process_spawn": false,
+      "secret_handles": [],
+      "browser_capability": "none",
+      "external_data_handling": "none"
+    },
+    "classes": [
+      {
+        "class": "tools",
+        "verdict": "removed",
+        "added": [],
+        "removed": [
+          "pkg_write"
+        ]
+      },
+      {
+        "class": "mcp_servers",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      },
+      {
+        "class": "network_destinations",
+        "verdict": "removed",
+        "added": [],
+        "removed": [
+          "https://telemetry.example.com"
+        ]
+      },
+      {
+        "class": "filesystem_scopes",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      },
+      {
+        "class": "secret_handles",
+        "verdict": "removed",
+        "added": [],
+        "removed": [
+          "aws::read-logs",
+          "gh::admin-org"
+        ]
+      },
+      {
+        "class": "process_spawn",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      },
+      {
+        "class": "browser_capability",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      },
+      {
+        "class": "external_data_handling",
+        "verdict": "unchanged",
+        "added": [],
+        "removed": []
+      }
+    ]
+  },
+  "plugin_policy_with_a_conflict": {
+    "_expected": "policy_conflict",
+    "_note": "F25-004: `blocked_packages` WINS over `allowed_packages`, and the conflict is REPORTED rather than silently resolved. Silently dropping the allow entry would leave an admin believing a package is permitted when it is not.",
+    "publisher_mode": "approved_publishers",
+    "approved_publishers": [
+      "pub_0123456789abcdef0123456789abcdef"
+    ],
+    "allowed_packages": [
+      "pkg_0123456789abcdef0123456789abcdef",
+      "pkg_ffffffffffffffffffffffffffffffff"
+    ],
+    "blocked_packages": [
+      "pkg_0123456789abcdef0123456789abcdef"
+    ],
+    "pinned_versions": {
+      "pkg_ffffffffffffffffffffffffffffffff": "1.0.0"
+    },
+    "auto_update": false,
+    "update_mode": "managed",
+    "version": 2,
+    "conflicts": [
+      "pkg_0123456789abcdef0123456789abcdef"
+    ],
+    "_verdicts": {
+      "pkg_0123456789abcdef0123456789abcdef": "plugin_blocked",
+      "pkg_ffffffffffffffffffffffffffffffff": "plugin_pinned for any version other than 1.0.0"
+    }
+  },
+  "kill_switch_organization_scope": {
+    "kill_switch_id": "ksw_0123456789abcdef0123456789abcdef",
+    "target_class": "plugin_version",
+    "target_ref": "pkg_0123456789abcdef0123456789abcdef@1.0.0",
+    "scope": "organization",
+    "organization_id": "org_0123456789abcdef0123456789abcdef",
+    "reason": "CVE-2026-0001 in 1.0.0",
+    "engaged_by_staff_principal_id": "stf_0123456789abcdef0123456789abcdef",
+    "engaged_at": "2026-09-26T12:00:00.000Z",
+    "expires_at": null,
+    "state": "engaged"
+  },
+  "kill_switch_global_scope": {
+    "_note": "F24's acceptance criterion: a rollback can target one org BEFORE a global disable. Both rows are returned by the read and the narrow one is evaluated last, so a caller that stops at the first engaged switch reports the narrow one. The organization-scoped switch is therefore the expected answer for `org_0123\u2026` even when the global one also matches.",
+    "kill_switch_id": "ksw_ffffffffffffffffffffffffffffffff",
+    "target_class": "plugin_version",
+    "target_ref": "pkg_0123456789abcdef0123456789abcdef@1.0.0",
+    "scope": "global",
+    "organization_id": null,
+    "reason": "all organizations, pending upstream fix",
+    "engaged_by_staff_principal_id": "stf_0123456789abcdef0123456789abcdef",
+    "engaged_at": "2026-09-26T12:30:00.000Z",
+    "expires_at": null,
+    "state": "engaged"
+  },
+  "feature_flag_with_a_percentage": {
+    "_note": "F24-006. `expires_at` is required, so a flag that is neither on, allowlisted, nor inside the percentage is still resolvable and its expiry is visible.",
+    "flag_key": "plugins.v2",
+    "enabled": true,
+    "rollout_percentage": 25,
+    "org_allowlist": [],
+    "cohort": "none",
+    "expires_at": "2026-10-26T12:00:00.000Z",
+    "owner_staff_principal_id": "stf_0123456789abcdef0123456789abcdef",
+    "updated_by": "stf_0123456789abcdef0123456789abcdef",
+    "version": 1,
+    "_expectations": {
+      "expired": "off, reported as `expired`, and NOT off because the flag is disabled \u2014 the expiry is checked first, so an expired flag says why it is off",
+      "stable": "the same organization resolves the same way on every call; the cohort is a hash of the organization id, never a per-request draw",
+      "monotonic": "raising the percentage never removes an organization that was already in"
+    }
+  },
+  "support_grant_expired": {
+    "grant_id": "sgr_0123456789abcdef0123456789abcdef",
+    "staff_principal_id": "stf_0123456789abcdef0123456789abcdef",
+    "organization_id": "org_0123456789abcdef0123456789abcdef",
+    "reason": "customer reported a stuck run",
+    "ticket_reference": "TICKET-4821",
+    "capabilities_json": [
+      "org.lookup",
+      "org.devices.read"
+    ],
+    "issued_at": "2026-09-26T09:00:00.000Z",
+    "expires_at": "2026-09-26T10:00:00.000Z",
+    "revoked_at": null,
+    "revoke_reason": null,
+    "version": 1,
+    "_expected": "staff_grant_expired",
+    "_note": "Expiry is evaluated on EVERY request, not once at creation. A grant whose TTL elapsed an hour ago must not keep working for whoever still holds it."
+  },
+  "support_grant_revoked": {
+    "grant_id": "sgr_ffffffffffffffffffffffffffffffff",
+    "staff_principal_id": "stf_0123456789abcdef0123456789abcdef",
+    "organization_id": "org_0123456789abcdef0123456789abcdef",
+    "reason": "customer reported a stuck run",
+    "ticket_reference": "TICKET-4822",
+    "capabilities_json": [
+      "org.lookup",
+      "org.devices.read"
+    ],
+    "issued_at": "2026-09-26T09:00:00.000Z",
+    "expires_at": "2026-09-26T18:00:00.000Z",
+    "revoked_at": "2026-09-26T10:30:00.000Z",
+    "revoke_reason": "resolved without access",
+    "version": 2,
+    "_expected": "staff_grant_revoked",
+    "_note": "A DIFFERENT code from the expired grant, because the two are different conversations with the person holding it. `revoke_reason` is as durable as the revocation: 0018 refuses a revocation without one and refuses to let one be blanked afterwards."
+  },
+  "plugin_install_pending_review": {
+    "_note": "What a managed-mode expansion REFUSAL looks like. It installs nothing; it records the candidate and the reason, so the org sees a version that is neither installed nor allowed AND why.",
+    "_reason_format": {
+      "shape": "<event id> <summary json>",
+      "event_id": "plugin.permission_expansion_detected.v1",
+      "summary": "{\"expands\":<bool>,\"classes\":[{\"class\":<name>,\"verdict\":<added|removed|unchanged>}]}",
+      "_note": "The event id is a STABLE CODE, and the payload after it is what names the class that grew. Both halves are part of the contract: a client that matches the whole stored string against the bare id matches nothing the server writes, and the operator is shown a raw code and a JSON blob at the one moment a reviewer most needs a sentence. Asserted on both sides \u2014 `apps/api/src/modules/p07_fixture_tests.rs` for the stored shape, `apps/web/src/features/plugins/fixture-contract.test.ts` for the sentence it becomes."
+    },
+    "install_id": "pil_0123456789abcdef0123456789abcdef",
+    "package_id": "pkg_0123456789abcdef0123456789abcdef",
+    "version": "1.0.0",
+    "pending_review_version": "1.1.0",
+    "review_state": "pending_review",
+    "review_reason": "plugin.permission_expansion_detected.v1 {\"expands\":true,\"classes\":[{\"class\":\"tools\",\"verdict\":\"added\"}]}",
+    "registered_tools": [
+      "pkg_read"
+    ],
+    "unregistered_tools": [
+      "pkg_write"
+    ],
+    "blocked_reason": null,
+    "approved_by": null,
+    "approved_at": null,
+    "created_at": "2026-09-26T12:00:00.000Z",
+    "updated_at": "2026-09-26T12:00:00.000Z",
+    "_projection": {
+      "_note": "The block above is the WHOLE `PluginInstall` detail projection \u2014 every field the API returns, with the nulls spelled out. It is that, not a subset, because a field the server omits is indistinguishable from one the browser forgot to ask for: `decodeInstall` refuses a response missing `blocked_reason`, `decodeDetail` then returns undefined, and the plugin detail page renders nothing at all. Asserted in both directions \u2014 `apps/api/src/routes/plugins.rs` pins the projection's key set to this block, and `apps/web/src/features/plugins/fixture-contract.test.ts` decodes this block and requires an exact match. `org_id` is deliberately absent: the route is org-scoped by the path, so returning it would be redundant state a client could hold stale."
+    }
+  }
+}

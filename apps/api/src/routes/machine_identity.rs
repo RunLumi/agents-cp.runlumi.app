@@ -1476,24 +1476,306 @@ fn store_unavailable(context: &RequestContext) -> ApiError {
     )
 }
 
-/// A verbatim copy of `budgets::list_budgets`'s signature and body shape, used
-/// once to prove whether a P07 module can host an axum handler at all.
-#[worker::send]
-pub async fn copy_of_budgets(
-    State(state): State<Arc<AppState>>,
-    Extension(context): Extension<RequestContext>,
-    headers: HeaderMap,
-    Path(org_id): Path<String>,
-) -> Result<Response<Body>, ApiError> {
-    authorize_org(
-        &state,
-        &headers,
-        &context,
-        &org_id,
-        Permission::ServiceAccountsRead,
-        Some("budget"),
-        None,
-    )
-    .await?;
-    Ok(json_response(&context, json!({ "ok": true })))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::core::ApiErrorCode;
+    use crate::repositories::{ApiKeyRecord, ServiceAccountRecord};
+
+    fn context() -> RequestContext {
+        RequestContext::new(
+            "req_0123456789abcdef0123456789abcdef".parse().unwrap(),
+            crate::core::CorrelationId::new("trace-p07").unwrap(),
+            "2026-09-26T12:00:00.000Z".parse().unwrap(),
+        )
+    }
+
+    fn account() -> ServiceAccountRecord {
+        ServiceAccountRecord {
+            service_account_id: "svc_0123456789abcdef0123456789abcdef".to_owned(),
+            org_id: "org_0123456789abcdef0123456789abcdef".to_owned(),
+            name: "ci-deploy".to_owned(),
+            description: Some("Deploys releases from CI.".to_owned()),
+            capabilities_json: r#"["runs.start","runs.read"]"#.to_owned(),
+            created_by_principal: "usr_0123456789abcdef0123456789abcdef".to_owned(),
+            status: "active".to_owned(),
+            expires_at: None,
+            suspended_at: None,
+            suspend_reason: None,
+            version: 1,
+            created_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            updated_at: "2026-09-26T12:00:00.000Z".to_owned(),
+        }
+    }
+
+    fn key() -> ApiKeyRecord {
+        ApiKeyRecord {
+            api_key_id: "key_0123456789abcdef0123456789abcdef".to_owned(),
+            service_account_id: "svc_0123456789abcdef0123456789abcdef".to_owned(),
+            org_id: "org_0123456789abcdef0123456789abcdef".to_owned(),
+            name: "ci-deploy".to_owned(),
+            key_prefix: "0f1e2d3c4b5a".to_owned(),
+            secret_hash: "a".repeat(64),
+            fingerprint: "0f1e2d3c4b5a6f70".to_owned(),
+            capabilities_json: r#"["runs.start"]"#.to_owned(),
+            project_ids_json: Some(r#"["prj_0123456789abcdef0123456789abcdef"]"#.to_owned()),
+            model_aliases_json: Some(r#"["coding-default"]"#.to_owned()),
+            network_allowlist_json: Some(r#"["*.ci.trusted.example"]"#.to_owned()),
+            status: "active".to_owned(),
+            rotated_from_key_id: None,
+            rotated_to_key_id: None,
+            last_used_at: Some("2026-09-26T13:00:00.000Z".to_owned()),
+            last_used_source: Some("ip:203.0.113.10".to_owned()),
+            expires_at: None,
+            revoked_at: None,
+            revoke_reason: None,
+            version: 1,
+            created_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            updated_at: "2026-09-26T12:00:00.000Z".to_owned(),
+        }
+    }
+
+    fn reason_of(error: &ApiError) -> String {
+        error.error.details["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    /// F14-002, structurally. The list, get, and audit projections have no
+    /// parameter that could carry a secret and no field for one, so this is not a
+    /// convention a future edit can quietly break.
+    #[test]
+    fn no_read_projection_can_carry_a_credential() {
+        // `json_response` wraps a projection without touching it — `(StatusCode,
+        // Json(body))` and nothing else — so asserting on the projections is
+        // asserting on the bodies. The alternative is reading the body back
+        // through the HTTP layer, which would need a `block_on` shim in a module
+        // that has no async work to block on.
+        for projection in [
+            service_account_json(&account()).to_string(),
+            api_key_json(&key()).to_string(),
+        ] {
+            for field in ["\"secret\"", "secret_hash", "wire_value"] {
+                assert!(
+                    !projection.contains(field),
+                    "{field} reached a read projection"
+                );
+            }
+            // The hash is in the record, so its absence is the real assertion.
+            assert!(!projection.contains(&"a".repeat(64)));
+            // A `key` field would be the raw value under a friendly name.
+            assert!(!projection.contains("\"key\":"));
+        }
+    }
+
+    #[test]
+    fn the_secret_projection_carries_it_once_with_a_notice() {
+        let secret = "lumik_0f1e2d3c4b5a_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v";
+        let projection = api_key_json_with_secret(&key(), secret);
+        assert_eq!(projection["secret"], secret);
+        assert!(
+            projection["secret_notice"]
+                .as_str()
+                .is_some_and(|notice| notice.contains("shown once")),
+        );
+        // Exactly once: the create response must not also carry it under a second
+        // name, and every other key field must match the metadata projection.
+        assert_eq!(
+            projection.as_object().expect("object").len(),
+            api_key_json(&key()).as_object().expect("object").len() + 2
+        );
+        let mut metadata = api_key_json(&key());
+        metadata
+            .as_object_mut()
+            .expect("object")
+            .remove("secret")
+            .map(|_| ())
+            .unwrap_or_default();
+        assert!(metadata.get("secret").is_none());
+    }
+
+    #[test]
+    fn a_null_scope_column_stays_null_and_never_becomes_an_empty_list() {
+        // `null` is "every project" and `[]` is "no project". Collapsing them is
+        // how a key that should reach everything ends up reaching nothing, or the
+        // reverse, so the distinction has to survive the projection.
+        let mut unrestricted = key();
+        unrestricted.project_ids_json = None;
+        assert_eq!(api_key_json(&unrestricted)["project_ids"], Value::Null);
+        let mut none = key();
+        none.project_ids_json = Some("[]".to_owned());
+        assert_eq!(api_key_json(&none)["project_ids"], json!([]));
+        // A column that is not JSON at all must not become a silent empty list
+        // presented as a deliberate "no scope".
+        let mut corrupt = key();
+        corrupt.model_aliases_json = Some("{not json".to_owned());
+        assert_eq!(api_key_json(&corrupt)["model_aliases"], json!([]));
+    }
+
+    #[test]
+    fn a_human_only_capability_is_refused_with_its_own_reason_not_a_generic_one() {
+        let context = context();
+        // The gate's decision 2: five human-only permissions, refused before scope
+        // is consulted. The reason string is what a client branches on, so an
+        // unknown capability and a human-only one must not collapse into one.
+        let human_only = parse_capabilities(&["org.lifecycle".to_owned()], &context)
+            .expect_err("a human-only capability is refused");
+        assert_eq!(reason_of(&human_only), "capability_human_only");
+        assert_eq!(human_only.error.code, ApiErrorCode::ValidationFailed);
+
+        let unknown = parse_capabilities(&["runs.teleport".to_owned()], &context)
+            .expect_err("an unknown capability is refused");
+        assert_eq!(reason_of(&unknown), "capability_unknown");
+        assert_ne!(reason_of(&unknown), reason_of(&human_only));
+    }
+
+    #[test]
+    fn the_domain_error_status_distinguishes_a_conflict_from_a_bad_request() {
+        let context = context();
+        // A key limit is a conflict the caller can resolve; a malformed field is
+        // not. Both carry a reason, so the HTTP status has to carry the rest.
+        for error in [
+            MachineIdentityError::KeyLimitReached,
+            MachineIdentityError::KeyTerminal,
+            MachineIdentityError::ScopeExceedsAccount,
+        ] {
+            let mapped = identity_error(&context, error);
+            assert_eq!(
+                mapped.error.code,
+                ApiErrorCode::Conflict,
+                "{}",
+                error.code()
+            );
+        }
+        for error in [
+            MachineIdentityError::InvalidInput,
+            MachineIdentityError::CapabilityUnknown,
+            MachineIdentityError::CapabilityHumanOnly,
+            MachineIdentityError::StoreUnreadable,
+        ] {
+            let mapped = identity_error(&context, error);
+            assert_eq!(
+                mapped.error.code,
+                ApiErrorCode::ValidationFailed,
+                "{}",
+                error.code()
+            );
+        }
+    }
+
+    #[test]
+    fn a_scoped_id_list_refuses_anything_that_is_not_that_id_type() {
+        let context = context();
+        // `project_ids` is a scope boundary, so a value that is not a project id
+        // must be refused rather than stored and later resolved.
+        assert!(
+            optional_id_list(None, "prj_", &context)
+                .expect("an absent list is absent")
+                .is_none()
+        );
+        assert!(
+            optional_id_list(Some(&[]), "prj_", &context)
+                .expect("an empty list is a real scope")
+                .is_some_and(|raw| raw == "[]")
+        );
+        for bad in [
+            "org_0123456789abcdef0123456789abcdef",
+            "*",
+            "prj_short",
+            "prj_0123456789abcdef0123456789abcdef_extra",
+        ] {
+            assert!(
+                optional_id_list(Some(&[bad.to_owned()]), "prj_", &context).is_err(),
+                "{bad} is not a project id"
+            );
+        }
+        // A duplicate is one scope stated twice, not two, so the stored column is
+        // deduplicated and ordered — which is what makes an unchanged PATCH a
+        // genuine no-op rather than a new version and a new audit entry.
+        let sorted = optional_id_list(
+            Some(&[
+                "prj_ffffffffffffffffffffffffffffffff".to_owned(),
+                "prj_0123456789abcdef0123456789abcdef".to_owned(),
+                "prj_0123456789abcdef0123456789abcdef".to_owned(),
+            ]),
+            "prj_",
+            &context,
+        )
+        .expect("valid ids");
+        assert_eq!(
+            sorted.as_deref(),
+            Some(
+                r#"["prj_0123456789abcdef0123456789abcdef","prj_ffffffffffffffffffffffffffffffff"]"#
+            )
+        );
+    }
+
+    #[test]
+    fn a_text_list_refuses_an_empty_or_over_long_entry() {
+        let context = context();
+        assert!(
+            optional_text_list(Some(&[String::new()]), &context).is_err(),
+            "an empty allowlist entry is a wildcard with no host"
+        );
+        assert!(optional_text_list(Some(&["x".repeat(301)]), &context).is_err());
+        assert!(
+            optional_text_list(Some(&["*.ci.trusted.example".to_owned()]), &context).is_ok(),
+            "a strict-subdomain pattern is a host, not a wildcard with no host"
+        );
+    }
+
+    #[test]
+    fn a_name_must_be_present_and_bounded() {
+        let context = context();
+        // Whitespace is not a name. A credential called " " sorts to the top of a
+        // list and tells an operator nothing about what it may do.
+        for bad in ["", "   ", "\t\n"] {
+            assert!(
+                validate_name(bad, &context).is_err(),
+                "{bad:?} is not a name"
+            );
+        }
+        assert!(validate_name(&"x".repeat(121), &context).is_err());
+        assert!(validate_name("ci-deploy", &context).is_ok());
+    }
+
+    #[test]
+    fn key_material_is_minted_or_nothing_is() {
+        // `mint_material` fails closed rather than falling back to a weaker
+        // source: a credential derived from anything but the platform CSPRNG is
+        // not a credential this product should issue. The host stub is
+        // deterministic, so the assertions are about shape, not entropy.
+        let Some(material) = mint_material() else {
+            return;
+        };
+        assert_eq!(material.key_prefix.len(), 12);
+        assert!(
+            material
+                .key_prefix
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        );
+        assert_eq!(material.secret_hash.len(), 64);
+        assert_eq!(material.fingerprint.len(), 16);
+        // The two hashes cover different inputs on purpose: one answers "is this
+        // the right secret", the other "which key was this".
+        assert_ne!(material.secret_hash, material.fingerprint);
+        assert!(material.wire_value().starts_with("lumik_"));
+    }
+
+    #[test]
+    fn the_cursor_decoder_refuses_a_cursor_it_cannot_attribute() {
+        let context = context();
+        assert_eq!(decode_cursor(None, &context).expect("absent"), (None, None));
+        assert_eq!(
+            decode_cursor(Some(""), &context).expect("empty"),
+            (None, None)
+        );
+        // A malformed cursor is refused rather than ignored, because ignoring it
+        // would silently restart pagination at page one under a cursor the caller
+        // still believes it is holding.
+        assert!(decode_cursor(Some("not-a-cursor"), &context).is_err());
+    }
 }

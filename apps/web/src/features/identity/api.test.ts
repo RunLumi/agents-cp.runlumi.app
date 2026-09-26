@@ -67,14 +67,27 @@ function accountBody(overrides: Record<string, unknown> = {}): Record<string, un
   };
 }
 
+/**
+ * `key_prefix` and `fingerprint` use the shapes
+ * `docs/implementation/fixtures/p07-contracts-v1.json` documents under
+ * `api_key._derivation`: twelve lowercase hex characters, and sixteen lowercase
+ * hex characters. An earlier version of this file used `lumik_0123456789ab` and
+ * `sha256:0123456789abcdef` — the scheme prefix belongs on the WIRE value the
+ * create response returns once, and the stored fingerprint is bare hex. Both
+ * decoders accept any string, so the wrong shape passed silently and would have
+ * taught a reader a format the API does not use.
+ */
+const KEY_PREFIX = "0f1e2d3c4b5a";
+const FINGERPRINT = "0f1e2d3c4b5a6f70";
+
 function keyBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: keyId,
     service_account_id: accountId,
     organization_id: orgId,
     name: "Release publisher",
-    key_prefix: "lumik_0123456789ab",
-    fingerprint: "sha256:0123456789abcdef",
+    key_prefix: KEY_PREFIX,
+    fingerprint: FINGERPRINT,
     capabilities: ["runs.start"],
     project_ids: [],
     model_aliases: [],
@@ -294,7 +307,7 @@ describe("P07 machine identity API contract", () => {
 
     vi.mocked(fetch).mockResolvedValue(response({ api_key: keyBody() }));
     const read = await getApiKey(keyId);
-    expect(read.key_prefix).toBe("lumik_0123456789ab");
+    expect(read.key_prefix).toBe(KEY_PREFIX);
     expect(Object.hasOwn(read as object, "secret")).toBe(false);
     // The `{api_key_id}` route resolves the organization from the key row, so it
     // takes no org in the path at all.

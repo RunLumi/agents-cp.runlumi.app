@@ -210,6 +210,12 @@ pub fn install_json(
         "pending_review_version": install.pending_review_version,
         "review_state": install.review_state,
         "review_reason": install.review_reason,
+        // The reason THIS organization gave, and the only place one is recorded.
+        // It is on the detail projection as well as the list projection: an
+        // operator who opens a blocked plugin must see why, and the browser's
+        // decoder requires the field, so an omission here is not a smaller
+        // response — it is a page that fails to decode and renders nothing.
+        "blocked_reason": install.blocked_reason,
         "approved_by": install.approved_by,
         "approved_at": install.approved_at,
         "registered_tools": registered_tools,
@@ -1815,4 +1821,512 @@ fn store_unavailable(context: &RequestContext) -> ApiError {
 
 fn json_response(body: Value) -> Response<Body> {
     (StatusCode::OK, Json(body)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use super::*;
+
+    use crate::repositories::{PluginInstallRecord, PluginPackageRecord, PluginVersionRecord};
+
+    const FIXTURE: &str =
+        include_str!("../../../../docs/implementation/fixtures/p07-contracts-v1.json");
+
+    fn context() -> RequestContext {
+        RequestContext::new(
+            "req_0123456789abcdef0123456789abcdef".parse().unwrap(),
+            crate::core::CorrelationId::new("trace-p07").unwrap(),
+            "2026-09-26T12:00:00.000Z".parse().unwrap(),
+        )
+    }
+
+    fn fixture_install() -> Value {
+        let value: Value = serde_json::from_str(FIXTURE).expect("the frozen fixture is valid JSON");
+        value["plugin_install_pending_review"]
+            .as_object()
+            .expect("object")
+            .iter()
+            .filter(|(key, _)| !key.starts_with('_'))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>()
+            .into()
+    }
+
+    fn install(blocked_reason: Option<&str>) -> PluginInstallRecord {
+        PluginInstallRecord {
+            install_id: "pil_0123456789abcdef0123456789abcdef".to_owned(),
+            org_id: "org_0123456789abcdef0123456789abcdef".to_owned(),
+            package_id: "pkg_0123456789abcdef0123456789abcdef".to_owned(),
+            version: "1.0.0".to_owned(),
+            pending_review_version: Some("1.1.0".to_owned()),
+            review_state: "pending_review".to_owned(),
+            review_reason: Some("plugin.permission_expansion_detected.v1".to_owned()),
+            approved_by: None,
+            approved_at: None,
+            blocked_reason: blocked_reason.map(str::to_owned),
+            version_counter: 1,
+            created_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            updated_at: "2026-09-26T12:00:00.000Z".to_owned(),
+        }
+    }
+
+    fn keys(value: &Value) -> BTreeSet<String> {
+        value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// The projection and the browser's decoder are two implementations of one
+    /// contract with no shared compiler between them, so the only thing standing
+    /// between them is a key set compared against a frozen block. This pins the
+    /// server's half of it: the projection emits EXACTLY the frozen fields, no
+    /// more and no fewer. An extra field is state a client holds stale; a
+    /// missing one is a page that does not render.
+    #[test]
+    fn the_install_projection_is_exactly_the_frozen_field_set() {
+        let projection = install_json(
+            &install(None),
+            vec!["pkg_read".to_owned()],
+            vec!["pkg_write".to_owned()],
+        );
+        assert_eq!(keys(&projection), keys(&fixture_install()));
+    }
+
+    /// The same projection with a reason recorded, so the block WINS over a block
+    /// with none. A field that only ever appears as null is a field nobody has
+    /// proven they can read.
+    #[test]
+    fn the_install_projection_carries_a_block_reason_when_there_is_one() {
+        let projection = install_json(
+            &install(Some("CVE-2026-0001 in 1.0.0")),
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(projection["blocked_reason"], "CVE-2026-0001 in 1.0.0");
+        // The same key set, because a reason must not change the shape.
+        assert_eq!(keys(&projection), keys(&fixture_install()));
+    }
+
+    /// `org_id` is deliberately absent: the route is org-scoped by the path, so
+    /// returning it would be redundant state a client could hold stale. Asserted
+    /// so a future "just include everything" edit is caught rather than shipped.
+    #[test]
+    fn the_install_projection_does_not_repeat_the_organizations_identity() {
+        let projection = install_json(&install(None), Vec::new(), Vec::new());
+        assert!(
+            !projection
+                .as_object()
+                .expect("object")
+                .contains_key("org_id")
+        );
+    }
+
+    fn manifest(fields: &[(&str, Value)]) -> String {
+        let mut object = serde_json::Map::new();
+        for (key, value) in fields {
+            object.insert((*key).to_owned(), value.clone());
+        }
+        let all: [(&str, Value); 8] = [
+            ("tools", json!([])),
+            ("mcp_servers", json!([])),
+            ("network_destinations", json!([])),
+            ("filesystem_scopes", json!([])),
+            ("process_spawn", json!(false)),
+            ("secret_handles", json!([])),
+            ("browser_capability", json!("none")),
+            ("external_data_handling", json!("none")),
+        ];
+        for (key, value) in all {
+            object.entry(key.to_owned()).or_insert(value);
+        }
+        Value::Object(object).to_string()
+    }
+
+    /// A manifest is a supply-chain declaration, so a field the parser can skip is
+    /// a capability nobody diffs. Every field is REQUIRED rather than defaulted,
+    /// which is why `manifest` above fills all eight before overriding any.
+    #[test]
+    fn a_manifest_missing_any_field_is_refused_rather_than_defaulted() {
+        let context = context();
+        for field in [
+            "tools",
+            "mcp_servers",
+            "network_destinations",
+            "filesystem_scopes",
+            "process_spawn",
+            "secret_handles",
+            "browser_capability",
+            "external_data_handling",
+        ] {
+            let mut object: serde_json::Map<String, Value> =
+                serde_json::from_str::<Value>(&manifest(&[]))
+                    .expect("json")
+                    .as_object()
+                    .expect("object")
+                    .clone();
+            object.remove(field);
+            let raw = Value::Object(object).to_string();
+            assert!(
+                parse_manifest(&raw, &context).is_err(),
+                "a manifest without {field} is not a manifest this platform can review"
+            );
+        }
+    }
+
+    /// A private, loopback or link-local destination is refused at REPORT time,
+    /// not filtered at install time, because a declaration the platform refuses to
+    /// record cannot later be diffed, reviewed, or audited.
+    ///
+    /// `parse_manifest` deliberately still ACCEPTS one, because it is the
+    /// submission boundary's job to refuse it with a reason, and a parser that
+    /// dropped the field would turn a refused report into a report that quietly
+    /// lost a capability. The refusal itself is asserted on the manifest the
+    /// parser returns, which is what `submit_plugin_report` checks.
+    ///
+    /// The check is on the HOST LITERAL, so a hostname that resolves inward is
+    /// still a declaration an operator can see, and a literal that is merely
+    /// suspicious is not in this list. `metadata.google.internal` is the known
+    /// case: it is a real metadata endpoint and it is NOT refused, because
+    /// `.internal` is not a reserved suffix and an organization may legitimately
+    /// host a name under it. A hostname blocklist is a policy decision for the
+    /// gate, not something to smuggle in as a test expectation.
+    #[test]
+    fn a_private_or_loopback_destination_is_refused_at_report_time() {
+        let context = context();
+        for destination in [
+            "http://127.0.0.1",
+            "https://10.0.0.5/v1",
+            "http://192.168.1.1",
+            "http://169.254.169.254/latest/meta-data",
+            "http://localhost:8080",
+            "http://api.localhost",
+            "http://files.local",
+            "ftp://files.example.com",
+            "example.com",
+            "http://[::1]/v1",
+        ] {
+            let raw = manifest(&[("network_destinations", json!([destination]))]);
+            let parsed = parse_manifest(&raw, &context)
+                .unwrap_or_else(|_| panic!("{destination} is a declaration, not a syntax error"));
+            assert_eq!(
+                parsed.rejected_destinations(),
+                vec![destination],
+                "{destination} declares access to whatever the host can reach"
+            );
+        }
+        // A public host is not rejected, and neither is a strict-subdomain
+        // pattern \u2014 `*.cdn.example.com` is a host, not a range.
+        let public = parse_manifest(
+            &manifest(&[(
+                "network_destinations",
+                json!(["https://api.example.com", "*.cdn.example.com"]),
+            )]),
+            &context,
+        )
+        .expect("public destinations parse");
+        assert!(public.rejected_destinations().is_empty());
+        // And the limitation above, asserted rather than only written down.
+        let metadata = parse_manifest(
+            &manifest(&[(
+                "network_destinations",
+                json!(["http://metadata.google.internal"]),
+            )]),
+            &context,
+        )
+        .expect("a suspicious hostname is still a declaration");
+        assert!(
+            metadata.rejected_destinations().is_empty(),
+            "if this ever starts being refused, the gate needs a policy note explaining why"
+        );
+    }
+
+    #[test]
+    fn a_public_destination_is_accepted_and_the_lists_come_back_normalized() {
+        let context = context();
+        let raw = manifest(&[
+            ("tools", json!(["pkg_write", "pkg_read", "pkg_read"])),
+            (
+                "network_destinations",
+                json!(["https://api.example.com", "*.cdn.example.com"]),
+            ),
+            (
+                "secret_handles",
+                json!([
+                    {"handle": "aws", "declared_purpose": "read-logs"},
+                    {"handle": "gh", "declared_purpose": "admin-org"},
+                ]),
+            ),
+        ]);
+        let parsed = parse_manifest(&raw, &context).expect("a valid manifest parses");
+        // Sorted and deduplicated, because the diff compares them as sets: an
+        // order change between two versions of the same manifest is not a
+        // capability change, and treating it as one flags every re-publish.
+        assert_eq!(parsed.tools, vec!["pkg_read", "pkg_write"]);
+        assert_eq!(
+            parsed.network_destinations,
+            vec!["*.cdn.example.com", "https://api.example.com"]
+        );
+        let handles: Vec<String> = parsed
+            .secret_handles
+            .iter()
+            .map(|handle| format!("{}::{}", handle.handle, handle.declared_purpose))
+            .collect();
+        assert_eq!(handles, vec!["aws::read-logs", "gh::admin-org"]);
+    }
+
+    #[test]
+    fn a_malformed_manifest_is_refused_with_a_stable_reason() {
+        let context = context();
+        for raw in [
+            "not json",
+            "[]",
+            "{}",
+            &manifest(&[("process_spawn", json!("yes"))]),
+            &manifest(&[("browser_capability", json!("omnipotent"))]),
+            &manifest(&[("external_data_handling", json!("whatever"))]),
+            &manifest(&[("tools", json!("pkg_read"))]),
+            &manifest(&[("secret_handles", json!([{"handle": "gh"}]))]),
+            &manifest(&[(
+                "secret_handles",
+                json!([{"handle": "", "declared_purpose": "admin-org"}]),
+            )]),
+        ] {
+            let error = parse_manifest(raw, &context).expect_err("refused");
+            assert_eq!(error.error.details["reason"], "manifest_invalid", "{raw}");
+        }
+    }
+
+    /// Each refusal is a different conversation with the caller, so each gets its
+    /// own stable code. A collapse of two of these into one is exactly the case a
+    /// test has to prevent: a client that branches on the reason would treat
+    /// "you are blocked" and "the digest does not match" as the same answer.
+    #[test]
+    fn every_denial_reason_is_a_distinct_stable_code() {
+        let context = context();
+        let reasons = [
+            PluginDenyReason::Blocked,
+            PluginDenyReason::Quarantined,
+            PluginDenyReason::PermissionExpanded,
+            PluginDenyReason::Pinned,
+            PluginDenyReason::Incompatible,
+            PluginDenyReason::IntegrityFailed,
+            PluginDenyReason::ToolUnregistered,
+            PluginDenyReason::PolicyConflict,
+            PluginDenyReason::ManifestInvalid,
+            PluginDenyReason::PublisherNotAllowed,
+            PluginDenyReason::VersionNotPendingReview,
+        ];
+        let mut codes: BTreeMap<String, ApiErrorCode> = BTreeMap::new();
+        for reason in reasons {
+            let error = plugin_error(&context, reason);
+            let code = error.error.details["reason"]
+                .as_str()
+                .expect("a reason")
+                .to_owned();
+            assert!(!code.is_empty(), "{reason:?} must carry a reason");
+            assert!(
+                codes.insert(code.clone(), error.error.code).is_none(),
+                "{code} is used by two different refusals"
+            );
+        }
+        assert_eq!(codes.len(), reasons.len());
+    }
+
+    /// A refusal to GRANT is a conflict the caller can resolve; a malformed or
+    /// unverifiable artifact is not. Both carry a reason, so the status has to
+    /// carry the difference between "not now" and "not ever, as submitted".
+    #[test]
+    fn the_status_distinguishes_a_refusal_from_an_unacceptable_submission() {
+        let context = context();
+        for reason in [
+            PluginDenyReason::Blocked,
+            PluginDenyReason::Quarantined,
+            PluginDenyReason::PermissionExpanded,
+            PluginDenyReason::Pinned,
+            PluginDenyReason::PolicyConflict,
+            PluginDenyReason::VersionNotPendingReview,
+        ] {
+            assert_eq!(
+                plugin_error(&context, reason).error.code,
+                ApiErrorCode::Conflict,
+                "{reason:?} is a conflict the caller can resolve"
+            );
+        }
+        for reason in [
+            PluginDenyReason::Incompatible,
+            PluginDenyReason::IntegrityFailed,
+            PluginDenyReason::ManifestInvalid,
+            PluginDenyReason::PublisherNotAllowed,
+        ] {
+            assert_eq!(
+                plugin_error(&context, reason).error.code,
+                ApiErrorCode::ValidationFailed,
+                "{reason:?} is an unacceptable submission"
+            );
+        }
+        // F13 default-deny is a permission decision, not a validation one, so a
+        // client can tell "you did not ask for it" from "you asked wrongly".
+        assert_eq!(
+            plugin_error(&context, PluginDenyReason::ToolUnregistered)
+                .error
+                .code,
+            ApiErrorCode::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn the_policy_projection_reports_a_conflict_and_never_resolves_one() {
+        // F25-004: the block wins and the contradiction is reported. Silently
+        // dropping the allow entry would leave an admin believing a package is
+        // permitted when it is not.
+        let policy = PluginPolicy {
+            publisher_mode: PublisherMode::ApprovedPublishers,
+            approved_publishers: vec!["pub_0123456789abcdef0123456789abcdef".to_owned()],
+            allowed_packages: vec![
+                "pkg_0123456789abcdef0123456789abcdef".to_owned(),
+                "pkg_ffffffffffffffffffffffffffffffff".to_owned(),
+            ],
+            blocked_packages: vec!["pkg_0123456789abcdef0123456789abcdef".to_owned()],
+            pinned_versions: BTreeMap::from([(
+                "pkg_ffffffffffffffffffffffffffffffff".to_owned(),
+                "1.0.0".to_owned(),
+            )]),
+            auto_update: false,
+            update_mode: UpdateMode::Managed,
+        };
+        let projection = policy_json(
+            &policy,
+            2,
+            vec!["pkg_0123456789abcdef0123456789abcdef".to_owned()],
+        );
+        assert_eq!(
+            projection["conflicts"],
+            json!(["pkg_0123456789abcdef0123456789abcdef"])
+        );
+        // The allow entry is still there. Removing it would hide the contradiction
+        // the conflicts array is reporting.
+        assert_eq!(
+            projection["allowed_packages"].as_array().map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(
+            projection["blocked_packages"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(projection["update_mode"], "managed");
+        assert_eq!(projection["version"], 2);
+    }
+
+    /// The audit payload and the stored reason carry the same summary, so an
+    /// operator who jumps from the UI to the audit view sees the same class list
+    /// rather than two different renderings of one decision.
+    #[test]
+    fn the_audit_summary_and_the_stored_reason_describe_the_same_classes() {
+        let before = parse_manifest(&manifest(&[]), &context()).expect("baseline");
+        let after = parse_manifest(
+            &manifest(&[
+                ("tools", json!(["pkg_read", "pkg_write"])),
+                // Unchanged, so it must NOT appear among the growing classes. A
+                // summary that listed it would make the audit view disagree with
+                // the permission diff the reviewer just approved.
+                ("network_destinations", json!(["https://api.example.com"])),
+            ]),
+            &context(),
+        )
+        .expect("candidate");
+        let diff = crate::modules::plugins::diff(Some("1.0.0"), &before, "1.1.0", &after);
+        // One tool added, one destination added: two growing classes, and the
+        // summary names both, because the review gate reads growth in any class.
+        let summary = policy_diff_summary(&diff);
+        assert_eq!(summary["expands"], true);
+        let growing: Vec<&str> = summary["classes"]
+            .as_array()
+            .expect("classes")
+            .iter()
+            .filter(|entry| entry["verdict"] == "added")
+            .map(|entry| entry["class"].as_str().expect("a class name"))
+            .collect();
+        assert_eq!(growing, ["tools", "network_destinations"]);
+        // The reason the install row stores is the event id plus this summary, and
+        // the browser parses exactly that shape to name the class to a reviewer.
+        let reason = format!("{PERMISSION_EXPANSION_REASON} {summary}");
+        let prefix = format!("{PERMISSION_EXPANSION_REASON} ");
+        assert!(reason.starts_with(&prefix), "{reason}");
+        let payload: Value = serde_json::from_str(reason[prefix.len()..].trim())
+            .expect("the reason payload is json");
+        assert_eq!(payload, summary);
+    }
+
+    #[test]
+    fn a_version_projection_carries_the_digest_and_nothing_private() {
+        let version = PluginVersionRecord {
+            plugin_version_id: "plv_0123456789abcdef0123456789abcdef".to_owned(),
+            package_id: "pkg_0123456789abcdef0123456789abcdef".to_owned(),
+            version: "1.0.0".to_owned(),
+            runtime_min: "1.0.0".to_owned(),
+            runtime_max: "3.0.0".to_owned(),
+            content_digest: "b".repeat(64),
+            // The signing secret's counterpart. A signature is not a credential,
+            // but it is not part of the contract either, so it stays in the store.
+            signature: "s".repeat(64),
+            manifest_json: r#"{"tools":["pkg_read"]}"#.to_owned(),
+            published_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            created_at: "2026-09-26T12:00:00.000Z".to_owned(),
+        };
+        let projection = version_json(&version);
+        assert_eq!(projection["content_digest"], "b".repeat(64));
+        assert!(
+            !projection
+                .as_object()
+                .expect("object")
+                .contains_key("signature")
+        );
+        // A manifest column that is not JSON is reported as null rather than as
+        // an empty object, so a reviewer is not shown a capability set that
+        // nothing declared.
+        let mut corrupt = version;
+        corrupt.manifest_json = "{not json".to_owned();
+        assert_eq!(version_json(&corrupt)["manifest"], Value::Null);
+    }
+
+    #[test]
+    fn a_package_projection_reports_officialness_as_a_boolean() {
+        let package = PluginPackageRecord {
+            package_id: "pkg_0123456789abcdef0123456789abcdef".to_owned(),
+            publisher_id: "pub_0123456789abcdef0123456789abcdef".to_owned(),
+            display_name: "Release helper".to_owned(),
+            summary: Some("Reads release state.".to_owned()),
+            status: "active".to_owned(),
+            created_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            updated_at: "2026-09-26T12:00:00.000Z".to_owned(),
+            // Stored as an integer because SQLite has no boolean; the wire has one
+            // because a client that has to remember 0/1 is a client that will.
+            publisher_official: 1,
+            publisher_status: "active".to_owned(),
+        };
+        let projection = package_json(&package);
+        assert_eq!(projection["publisher_official"], true);
+        // The stored integer is normalized to a boolean, because a client that has
+        // to remember that 0 means false is a client that will get it wrong on the
+        // row that matters. And the publisher's own status is not part of this
+        // contract, so it stays in the store.
+        assert_eq!(
+            keys(&projection),
+            BTreeSet::from([
+                "package_id".to_owned(),
+                "publisher_id".to_owned(),
+                "publisher_official".to_owned(),
+                "display_name".to_owned(),
+                "summary".to_owned(),
+                "status".to_owned(),
+                "created_at".to_owned(),
+                "updated_at".to_owned(),
+            ])
+        );
+    }
 }
