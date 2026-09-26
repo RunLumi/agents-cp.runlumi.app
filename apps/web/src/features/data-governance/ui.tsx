@@ -13,10 +13,130 @@
  * 120–180ms hover/focus transitions that `prefers-reduced-motion` removes.
  */
 
-import type { ReactNode } from "react";
+import { useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import { presentDataError } from "./contracts";
 import type { Tone } from "./contracts";
+
+/**
+ * A horizontal tab strip for the sub-pages of one settings surface.
+ *
+ * WHY this is here: `docs/screens/lumi_export_history.webp` shows Data &
+ * Retention as ONE page with four tabs — Retention policies, Export history,
+ * Data controls, Deletion requests — rather than four separate surfaces. The
+ * tabs sit above a single hairline rule, left-aligned, with the active tab
+ * carrying an Lumi Blue underline.
+ *
+ * Lumi Blue is the authority color, so it is correct here: the underline marks
+ * which sub-page you are on. It is never decoration.
+ *
+ * Keyboard behavior follows the ARIA tabs pattern: arrow keys move between
+ * tabs, Home/End jump to the ends, and focus is roving so a single Tab press
+ * reaches the strip rather than every tab in it.
+ */
+export function TabNav<T extends string>({
+  tabs,
+  active,
+  onChange,
+  label,
+}: {
+  tabs: ReadonlyArray<{ id: T; label: string }>;
+  active: T;
+  onChange: (id: T) => void;
+  label: string;
+}) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  function move(next: number) {
+    const bounded = (next + tabs.length) % tabs.length;
+    const target = tabs[bounded];
+    if (!target) return;
+    onChange(target.id);
+    // Move focus with the selection so the keyboard user keeps their place.
+    listRef.current
+      ?.querySelector<HTMLButtonElement>(`[data-tab-id="${CSS.escape(target.id)}"]`)
+      ?.focus();
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const current = tabs.findIndex((tab) => tab.id === active);
+    if (current < 0) return;
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      move(current + 1);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      move(current - 1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      move(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      move(tabs.length - 1);
+    }
+  }
+
+  return (
+    <div
+      ref={listRef}
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      className="flex gap-1 overflow-x-auto border-b border-[var(--border)]"
+    >
+      {tabs.map((tab) => {
+        const selected = tab.id === active;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            data-tab-id={tab.id}
+            id={`${label.replace(/\s+/g, "-").toLowerCase()}-tab-${tab.id}`}
+            aria-selected={selected}
+            aria-controls={`${label.replace(/\s+/g, "-").toLowerCase()}-panel-${tab.id}`}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(tab.id)}
+            className={`-mb-px shrink-0 border-b-2 px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 ${
+              selected
+                ? "border-[var(--lumi-blue)] text-[var(--civic-navy)]"
+                : "border-transparent text-[var(--muted-strong)] hover:bg-[var(--panel-hover)] hover:text-[var(--civic-navy)]"
+            }`}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The single tab panel body. `role="tabpanel"` is required for the tabs to be
+ * announced correctly, and it must be labelled by its tab.
+ */
+export function TabPanel({
+  id,
+  label,
+  children,
+}: {
+  id: string;
+  label: string;
+  children: ReactNode;
+}) {
+  const base = label.replace(/\s+/g, "-").toLowerCase();
+  return (
+    <div
+      role="tabpanel"
+      id={`${base}-panel-${id}`}
+      aria-labelledby={`${base}-tab-${id}`}
+      tabIndex={0}
+      className="outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2"
+    >
+      {children}
+    </div>
+  );
+}
 
 export function Surface({
   children,

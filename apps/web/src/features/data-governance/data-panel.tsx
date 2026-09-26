@@ -34,13 +34,44 @@ import { DataPolicyEditor } from "./data-policy";
 import { OrgDeletionWorkflow, PersonalDeletionWorkflow } from "./deletion-workflows";
 import { OrgExportWorkflow, PersonalExportWorkflow } from "./export-workflows";
 import { RetentionSummary } from "./retention-summary";
-import { ErrorNotice, LoadingRows, Notice, PermissionState, Pill, Surface } from "./ui";
+import {
+  ErrorNotice,
+  LoadingRows,
+  Notice,
+  PermissionState,
+  Pill,
+  Surface,
+  SurfaceHeader,
+  TabNav,
+  TabPanel,
+} from "./ui";
 
 type LoadState<T> =
   | { kind: "loading" }
   | { kind: "ready"; data: T; stale: boolean }
   | { kind: "error"; error: unknown; previous: T | null }
   | { kind: "permission" };
+
+/**
+ * The four sub-pages of Data & Retention, in the order
+ * `docs/screens/lumi_export_history.webp` shows them.
+ */
+const DATA_TABS = [
+  { id: "retention", label: "Retention policies" },
+  { id: "exports", label: "Export history" },
+  { id: "controls", label: "Data controls" },
+  { id: "deletions", label: "Deletion requests" },
+] as const;
+
+type DataTab = (typeof DATA_TABS)[number]["id"];
+
+/** Accessible name for each tab's loading/empty surface. */
+const TAB_PANEL_LABEL: Record<DataTab, string> = {
+  retention: "Retention policies",
+  exports: "Export history",
+  controls: "Data controls",
+  deletions: "Deletion requests",
+};
 
 const EMPTY_EXPORT_PAGE: Page<ExportJob> = { items: [], next_cursor: null, has_more: false };
 
@@ -113,6 +144,11 @@ export function DataPanel({
   } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Which Data & Retention sub-page is showing. Defaulted to the retention tab
+  // because that is the policy a new tenant most likely needs to understand
+  // first; a tenant mid-deletion is routed to the deletion tab by the shell,
+  // not by guessing here.
+  const [tab, setTab] = useState<DataTab>("retention");
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -229,15 +265,23 @@ export function DataPanel({
   }
 
   if (policy.kind === "loading" && exports.kind === "loading" && deletions.kind === "loading") {
+    // The tab strip is deliberately NOT short-circuited away here. An early
+    // return here would mean a slow policy read blocks the Deletion requests
+    // tab entirely — which is exactly the state a `pending_deletion`
+    // organization is in, and the one place a user most needs to reach the
+    // job status. The strip and the active tab's loading state are enough.
     return (
       <section aria-label="Data and retention" className="space-y-5">
         <PanelHeading stale={false} refreshing={refreshing} onRefresh={() => void load()} />
-        <Surface ariaLabel="Data policy">
-          <LoadingRows
-            label="Loading the data policy, retention windows, and job history…"
-            rows={5}
-          />
-        </Surface>
+        <TabNav label="Data and retention" tabs={DATA_TABS} active={tab} onChange={setTab} />
+        <TabPanel id={tab} label="Data and retention">
+          <Surface ariaLabel={TAB_PANEL_LABEL[tab]}>
+            <LoadingRows
+              label="Loading the data policy, retention windows, and job history…"
+              rows={5}
+            />
+          </Surface>
+        </TabPanel>
       </section>
     );
   }
@@ -283,6 +327,28 @@ export function DataPanel({
         onRefresh={() => void load()}
       />
 
+      {/*
+        WHY tabs: `docs/screens/lumi_export_history.webp` presents Data &
+        Retention as ONE page with four tabs — Retention policies, Export
+        history, Data controls, Deletion requests — not as four stacked
+        surfaces. The tab strip is the reference's layout intent, so it is
+        preserved here.
+
+        WHY the selection is lifted: a `pending_deletion` organization is
+        fenced for the policy read, so the panel must be able to show the
+        DELETION tab — status and resume — while the retention tab is
+        unreadable. That is only possible because the job surfaces are
+        rendered outside the policy guard below, not inside the retention
+        tab.
+      */}
+      <TabNav label="Data and retention" tabs={DATA_TABS} active={tab} onChange={setTab} />
+
+      {/*
+        Fenced-tenant copy. This sits ABOVE the tab strip and outside every tab
+        so a tenant mid-deletion is told why the policy is unavailable no
+        matter which sub-page it lands on — otherwise someone could open
+        "Retention policies" and conclude the record was simply missing.
+      */}
       {policy.kind === "error" ? (
         <div className="space-y-3">
           <ErrorNotice
@@ -299,79 +365,126 @@ export function DataPanel({
         </div>
       ) : null}
 
-      {currentPolicy !== null ? (
-        <>
-          <DataPolicyEditor
-            orgId={orgId}
-            api={client}
-            policy={currentPolicy}
-            status={policyStale ? "stale" : "ready"}
-            onRefresh={() => void load()}
-            onSaved={(next) => setPolicy({ kind: "ready", data: next, stale: false })}
-            {...(currentUserId === undefined ? {} : { currentUserId })}
-            canManage={canManage}
-          />
+      {tab === "retention" ? (
+        <TabPanel id="retention" label="Data and retention">
+          <div className="space-y-5">
+            {currentPolicy !== null ? (
+              <>
+                <DataPolicyEditor
+                  orgId={orgId}
+                  api={client}
+                  policy={currentPolicy}
+                  status={policyStale ? "stale" : "ready"}
+                  onRefresh={() => void load()}
+                  onSaved={(next) => setPolicy({ kind: "ready", data: next, stale: false })}
+                  {...(currentUserId === undefined ? {} : { currentUserId })}
+                  canManage={canManage}
+                />
 
-          <RetentionSummary policy={currentPolicy} />
-        </>
+                <RetentionSummary policy={currentPolicy} />
+              </>
+            ) : null}
+          </div>
+        </TabPanel>
       ) : null}
 
-      {exportPage !== null ? (
-        <OrgExportWorkflow
-          orgId={orgId}
-          api={client}
-          legalHold={currentPolicy?.legal_hold ?? false}
-          canExport={canExport}
-          page={exportPage}
-          status={
-            exports.kind === "loading" ? "loading" : exports.kind === "error" ? "error" : "ready"
-          }
-          error={exports.kind === "error" ? exports.error : null}
-          refreshing={refreshing}
-          onRefresh={() => void load()}
-          onLoadMore={() => void loadMoreExports()}
-          onCreated={(job) =>
-            setExports((current) =>
-              current.kind === "ready"
-                ? { kind: "ready", data: prepend(current.data, job), stale: false }
-                : current,
-            )
-          }
-        />
+      {tab === "exports" ? (
+        <TabPanel id="exports" label="Data and retention">
+          <div className="space-y-5">
+            {exportPage !== null ? (
+              <OrgExportWorkflow
+                orgId={orgId}
+                api={client}
+                legalHold={currentPolicy?.legal_hold ?? false}
+                canExport={canExport}
+                page={exportPage}
+                status={
+                  exports.kind === "loading"
+                    ? "loading"
+                    : exports.kind === "error"
+                      ? "error"
+                      : "ready"
+                }
+                error={exports.kind === "error" ? exports.error : null}
+                refreshing={refreshing}
+                onRefresh={() => void load()}
+                onLoadMore={() => void loadMoreExports()}
+                onCreated={(job) =>
+                  setExports((current) =>
+                    current.kind === "ready"
+                      ? { kind: "ready", data: prepend(current.data, job), stale: false }
+                      : current,
+                  )
+                }
+              />
+            ) : null}
+          </div>
+        </TabPanel>
       ) : null}
 
-      {deletionPage !== null ? (
-        <OrgDeletionWorkflow
-          orgId={orgId}
-          api={client}
-          page={deletionPage}
-          detail={detail?.job ?? null}
-          detailStatus={detail === null ? "idle" : detail.status}
-          detailError={detail?.error ?? null}
-          status={
-            deletions.kind === "loading"
-              ? "loading"
-              : deletions.kind === "error"
-                ? "error"
-                : "ready"
-          }
-          error={deletions.kind === "error" ? deletions.error : null}
-          refreshing={refreshing}
-          canDelete={canDelete}
-          onRefresh={() => void load()}
-          onLoadMore={() => void loadMoreDeletions()}
-          onSelect={(deletionId) => void loadDetail(deletionId)}
-          onResumed={(job) =>
-            setDetail((current) =>
-              current === null ? current : { ...current, status: "ready", job, error: null },
-            )
-          }
-          {...(onRequestOrganizationDeletion === undefined
-            ? {}
-            : { onRequestOrganizationDeletion })}
-        />
+      {tab === "controls" ? (
+        <TabPanel id="controls" label="Data and retention">
+          <div className="space-y-5">
+            <Surface ariaLabel="Data controls">
+              <SurfaceHeader
+                title="Data controls"
+                description="Where Lumi's own records live, and what the platform holds on your behalf."
+              />
+              <div className="p-5">
+                <p className="text-sm leading-6 text-[var(--muted-strong)]">
+                  Inference, usage, and audit records are governed by the retention and logging
+                  policy on the Retention policies tab. Export and deletion requests are managed
+                  from their own tabs.
+                </p>
+              </div>
+            </Surface>
+          </div>
+        </TabPanel>
       ) : null}
 
+      {tab === "deletions" ? (
+        <TabPanel id="deletions" label="Data and retention">
+          <div className="space-y-5">
+            {deletionPage !== null ? (
+              <OrgDeletionWorkflow
+                orgId={orgId}
+                api={client}
+                page={deletionPage}
+                detail={detail?.job ?? null}
+                detailStatus={detail === null ? "idle" : detail.status}
+                detailError={detail?.error ?? null}
+                status={
+                  deletions.kind === "loading"
+                    ? "loading"
+                    : deletions.kind === "error"
+                      ? "error"
+                      : "ready"
+                }
+                error={deletions.kind === "error" ? deletions.error : null}
+                refreshing={refreshing}
+                canDelete={canDelete}
+                onRefresh={() => void load()}
+                onLoadMore={() => void loadMoreDeletions()}
+                onSelect={(deletionId) => void loadDetail(deletionId)}
+                onResumed={(job) =>
+                  setDetail((current) =>
+                    current === null ? current : { ...current, status: "ready", job, error: null },
+                  )
+                }
+                {...(onRequestOrganizationDeletion === undefined
+                  ? {}
+                  : { onRequestOrganizationDeletion })}
+              />
+            ) : null}
+          </div>
+        </TabPanel>
+      ) : null}
+
+      {/*
+        Refresh failures are reported ONCE, below whichever tab is showing,
+        rather than inside the tab that produced them. A user on the Deletion
+        requests tab should not be told the export history failed to refresh.
+      */}
       {exports.kind === "error" ? (
         <ErrorNotice
           error={exports.error}
