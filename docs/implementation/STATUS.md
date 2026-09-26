@@ -7,11 +7,11 @@ Last initialized: 2026-09-24
 ## Current phase
 
 - Active execution model: **P00**
-- Current implementation phases: **P06 implementation ready (Contract Gate frozen); P05 complete; P04 implemented/review; P03 complete**
-- Next implementable phase: **P06 MOD/BE/FE/INT/QA packets are unblocked by frozen `p06-cg-v1`; start with P06-MOD-01..03 and P06-BE-01**
-- Current Contract Gates: **P02-CG `p02-cg-v2`; P03-CG `p03-cg-v1`; P04-CG `p04-cg-v1`; P05-CG `p05-cg-v1`; P06-CG `p06-cg-v1` (frozen)**
-- Shared-file owner: **P06 coordinator for P06; P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
-- Integration owner: **P06 coordinator for P06; P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
+- Current implementation phases: **P07 implementation complete (Integration Gate: PASS WITH FOLLOW-UP); P06 implementation complete; P05 complete; P04 implemented/review; P03 complete**
+- Next implementable phase: **P08, once P07's browser and local-D1 follow-ups are accepted as carried debt. P07-MOD-01/BE-01 (F06) stay frozen-not-built and are not blockers.**
+- Current Contract Gates: **P02-CG `p02-cg-v2`; P03-CG `p03-cg-v1`; P04-CG `p04-cg-v1`; P05-CG `p05-cg-v1`; P06-CG `p06-cg-v1`; P07-CG `p07-cg-v1` (frozen, no Change Request)**
+- Shared-file owner: **P07 coordinator for P07; P06 coordinator for P06; P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
+- Integration owner: **P07 coordinator for P07; P06 coordinator for P06; P05 coordinator for P05; P04 coordinator for P04; P03 coordinator (merged) for P03**
 
 ## Phase status
 
@@ -24,7 +24,7 @@ Last initialized: 2026-09-24
 | P04   | review                                    | frozen: `p04-cg-v1` (`57b2df9`)                                    | conditional: `docs/implementation/gates/P04-IG.md`      | P03 is merged and the combined P03/P04 smoke passes; P04 vertical slice, 131 Rust tests, Worker/WASM builds, hostile smoke, idempotency/health/policy extensions, authenticated desktop/narrow/editor captures, and handoffs pass; local downstream-disconnect delivery remains an explicit runtime follow-up |
 | P05   | complete                                  | frozen: `p05-cg-v1` (`b5a5ea8`; CR-001/CR-002 accepted)            | conditional PASS: `docs/implementation/gates/P05-IG.md` | PR #18 merged as `976a40b`; 185-check fresh-D1/Worker managed loop passes; generic privileged approval, accounting, hostile cases, timeline/audit, and hard-budget denial pass; public CUA/browser execution and passive cancellation remain explicit limitations                                             |
 | P06   | implementation complete; visual pass owed | frozen: `p06-cg-v1` (`11341a5`, PR #22; CR-001/002/003 + ADR 0006) | PASS: all six claims mapped to named evidence           | 15 migrations, 48 routes mounted, 668 Rust + 479 web tests, hosted CI green. Frontend reconciled with `docs/screens/lumi_plan_entitlements.webp` and `lumi_export_history.webp`, under the authority of F22's information-architecture tree: Data & Retention is one four-tab Settings page, Billing is the reference's two-column card grid with a "Usage vs. plan limits" table, and the three P06 settings surfaces (billing, data, webhooks) sit under Settings at `/org/{slug}/settings/...` with breadcrumbs, while Automations stays top level. **Outstanding:** no P06 surface has been visually verified in a browser — none is attached to this session. `docs/screens/` has no reference for automations or webhooks; that gap is real, and is recorded in the P06-FE handoff together with the deliberate deviations |
-| P07   | foundation merged; phase in progress       | frozen: `p07-cg-v1` (ADR 0007)                                  not called                                          | P07-MOD-02 substantially complete: schema `0016` with 33 invariants proven rejected in-database, `core::machine` and `authorize_machine` (32 tests). Contract gate frozen; scope cut to F14 + F25 + F24-007 with F06 frozen-not-built. **P07 is NOT complete:** no routes, no auth path, no plugin/staff/flag code, no FE, no INT, no QA packet. See `handoffs/P07-COORD-01.md` |
+| P07   | implementation complete; visual pass owed | frozen: `p07-cg-v1` (ADR 0007), fixture `p07-contracts-v1.json`   | PASS WITH FOLLOW-UP: `docs/implementation/gates/P07-IG.md` | Scope cut to F14 + F25 + F24-007, with F06 (SSO/SCIM/domains) and the internal ops console frozen-not-built per the gate's decisions 3 and 4. 22 routes mounted across 3 modules plus `require_machine`/`require_staff`; migrations `0016`–`0018`; 848 Rust + 720 web tests; **97/97 storage invariants proven rejected by the database itself, now a CI gate via `pnpm test`**. Six defects found by tests and fixed, including a `blocked_reason` omission that made the plugin detail page render nothing and a `*.suffix` manifest form that could not be reported at all. **Outstanding, and the reason this is not a plain PASS:** no P07 surface has been rendered in a browser (none attached), so desktop/narrow layout, focus rings, and async states are visually unverified — P06 carries the same debt; and the vertical slice is proven at the domain/projection/database layers rather than by an end-to-end request against a running Worker. `docs/screens/` has no reference for any P07 surface. F22 places neither, so `Plugins` and `Identity & access` are recorded deviations under Settings rather than claimed as F22-authorized |
 | P08   | blocked                                   | blocked                                                            | blocked                                                 | waits for integration foundations                                                                                                                                                                                                                                                                             |
 | P09   | blocked                                   | blocked                                                            | blocked                                                 | release hardening only                                                                                                                                                                                                                                                                                        |
 
@@ -161,6 +161,36 @@ P05 Contract Gate `p05-cg-v1` is frozen at `b5a5ea8`; no dependent packet may re
 | P06-QA-01     | done   | All six Integration Gate claims mapped to named evidence                                         |
 
 P06 Contract Gate `p06-cg-v1` is frozen at `11341a5` in `docs/implementation/gates/P06-CG.md`, with fixture `docs/implementation/fixtures/p06-contracts-v1.json`. Normative clarifications: `P06-CR-001` (lease fencing/`ambiguous`, calendar intervals, off-peak execution class), `P06-CR-002` (entitlement/license separation, internal-only overrides, provider projection), `P06-CR-003` (P02 deletion bridge, private R2 per ADR 0006). No implementation packet may silently redefine these contracts.
+
+## P07 packet status
+
+| Packet        | State  | Notes                                                                                                    |
+| ------------- | ------ | -------------------------------------------------------------------------------------------------------- |
+| P07-CG        | merged | `p07-cg-v1` frozen with ADR 0007; fixture `p07-contracts-v1.json` created and consumed by Rust **and** TS |
+| P07-MOD-01    | frozen | Enterprise identity (F06). Frozen-not-built per coordinator decision 3; no schema needed, `sso.enabled`/`scim.enabled` already seeded `false` |
+| P07-MOD-02    | merged | Machine identity: `CapabilitySet`, `ApiKeyScope`, `authorize_machine`, key material. 35 + 35 tests     |
+| P07-MOD-03    | merged | Plugin governance: manifest, 8-class diff, policy, two decision functions. 24 tests                     |
+| P07-MOD-04    | merged | Staff/support: `StaffRole`, 5 human-only permissions, support-grant TTL and reason. 14 tests            |
+| P07-BE-01     | frozen | SSO/SCIM APIs. Frozen-not-built with MOD-01                                                              |
+| P07-BE-02     | merged | 9 service-account/API-key routes; `require_machine`; 10 projection and error tests                      |
+| P07-BE-03     | merged | 6 `/api/v1/internal/*` routes; `require_staff`; 8 tests. No web client, per gate decision 4              |
+| P07-BE-04     | merged | 9 plugin policy/install/report routes; 13 tests. Migrations `0017`/`0018`, 13 data classes              |
+| P07-COORD-01  | merged | 22 routes mounted in `app.rs`; the four P07 permissions added to `role_allows`, not only `Permission`    |
+| P07-FE-01     | merged | Identity settings section. 3-capability set, human-only refused, no wildcard offered. 15 tests          |
+| P07-FE-02     | merged | Service accounts + API keys; one-time secret reveal as a pure reducer. 30 tests                         |
+| P07-FE-03     | merged | Plugin governance: diff, install state, pin, block reason, tool registration. 35 tests                  |
+| P07-FE-04     | frozen | Internal operations UI. Not needed; deliberately not built per gate decision 4                          |
+| P07-INT-01    | merged | `POST /plugin-reports`; the server decides, the report is evidence and can only downgrade               |
+| P07-INT-02    | merged | `require_machine` + `GET /api/v1/machine/whoami`. Server-side seam only; **no LumiAgents-side code exists** |
+| P07-QA-01     | merged | 97 storage invariants (5 cross-tenant), the plan07 hostile matrix traced item by item, 4 items N/A      |
+
+P07 Contract Gate `p07-cg-v1` is frozen in `docs/implementation/gates/P07-CG.md`
+with ADR 0007 and no Change Request. Scope was cut by coordinator decision, not by
+omission: F06 (SSO/SCIM/domains) and the internal operations console are frozen in
+full in the gate, so implementing either is mechanical rather than a fresh design
+exercise. Coordinator evidence is in `docs/implementation/gates/P07-IG.md`; the
+prior foundation handoff, `P07-COORD-01.md`, is superseded by the four packet
+handoffs and the gate.
 
 ## Rule
 
